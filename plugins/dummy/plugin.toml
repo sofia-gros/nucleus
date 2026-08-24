@@ -1,0 +1,14 @@
+[plugin]
+id = "example.dummy"
+name = "Dummy Plugin"
+version = "0.1.0"
+api_version = "1"
+
+[runtime]
+wasm = "dummy_plugin.wasm"
+
+[permissions]
+filesystem = []
+process = []
+network = false
+terminal = false

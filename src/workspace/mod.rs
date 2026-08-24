@@ -8,6 +8,9 @@ pub mod right_sidebar;
 pub mod bottom_panel;
 pub mod editor_area;
 
+use std::sync::mpsc::Receiver;
+use crate::plugin_manager::{action::PluginAction, event::PluginEvent, PluginManagerGlobal};
+
 use title_bar::TitleBar;
 use status_bar::StatusBar;
 use activity_bar::ActivityBar;
@@ -36,6 +39,30 @@ impl Workspace {
             right_sidebar: cx.new(|_| RightSidebar::new()),
             bottom_panel: cx.new(|_| BottomPanel::new()),
             editor_area: cx.new(|_| EditorArea::new()),
+        }
+    }
+
+    pub fn handle_action(&mut self, action: PluginAction, cx: &mut Context<Self>) {
+        match action {
+            PluginAction::OpenTab { title, content } => {
+                self.editor_area.update(cx, |editor, cx| {
+                    editor.open_tab(title.clone(), content, cx);
+                });
+                
+                if cx.has_global::<PluginManagerGlobal>() {
+                    let pm_entity = cx.global::<PluginManagerGlobal>().0.clone();
+                    pm_entity.update(cx, |pm, _cx| {
+                        pm.dispatch_event(PluginEvent::FileOpened { path: title });
+                    });
+                }
+            }
+            PluginAction::ShowNotification { message } => {
+                println!("UI Notification: {}", message);
+            }
+            PluginAction::OpenPanel { id } => {
+                println!("UI Action: OpenPanel {}", id);
+            }
+            _ => {}
         }
     }
 }
