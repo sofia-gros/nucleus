@@ -1,25 +1,10 @@
 use gpui::*;
-use gpui_component::input::{Editor, EditorState, TabSize};
-use gpui_component::{button::*, *};
+use gpui_component::*;
+use workspace::Workspace;
 
-pub struct Nucleus;
-
-impl Render for Nucleus {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .v_flex()
-            .gap_2()
-            .size_full()
-            .items_center()
-            .justify_center()
-            .child(
-                Button::new("ok")
-                    .primary()
-                    .label("Let's Go!")
-                    .on_click(|_, _, _| println!("Clicked!")),
-            )
-    }
-}
+pub mod editor;
+pub mod plugin_manager;
+mod workspace;
 
 fn main() {
     let app = gpui_platform::application().with_assets(gpui_component_assets::Assets);
@@ -30,7 +15,7 @@ fn main() {
 
         cx.spawn(async move |cx| {
             cx.open_window(WindowOptions::default(), |window, cx| {
-                let view = cx.new(|_| Nucleus);
+                let view = cx.new(|cx| Workspace::new(cx));
                 // This first level on the window, should be a Root.
                 cx.new(|cx| Root::new(view, window, cx))
             })
