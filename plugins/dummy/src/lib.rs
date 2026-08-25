@@ -62,12 +62,30 @@ pub extern "C" fn init() {
     unsafe {
         host_log(msg.as_ptr(), msg.len() as i32);
     }
+    
+    // test settings
+    let res = invoke("settings.get", r#"{"key": "theme"}"#);
+    let msg = format!("settings.get response: {}", res);
+    unsafe { host_log(msg.as_ptr(), msg.len() as i32); }
+
+    let res = invoke("settings.set", r#"{"key": "theme", "value": "light"}"#);
+    let msg = format!("settings.set response: {}", res);
+    unsafe { host_log(msg.as_ptr(), msg.len() as i32); }
 
     let res = invoke("panel.open", r#"{"id": "plugin_side_panel"}"#);
     let msg = format!("open_panel response: {}", res);
     unsafe {
         host_log(msg.as_ptr(), msg.len() as i32);
     }
+
+    // test process
+    let res = invoke("process.spawn", r#"{"id": "test_proc_1", "command": "cmd.exe", "args": ["/c", "echo", "Hello from child process!"]}"#);
+    let msg = format!("process.spawn response: {}", res);
+    unsafe { host_log(msg.as_ptr(), msg.len() as i32); }
+
+    // test terminal
+    invoke("terminal.write", r#"{"text": "Initializing Dummy Plugin..."}"#);
+    invoke("terminal.write", r#"{"text": "[INFO] Plugin loaded successfully!"}"#);
 
     // test large actions
     for i in 0..5 {

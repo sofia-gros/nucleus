@@ -7,8 +7,10 @@ pub mod event;
 use anyhow::Result;
 use std::path::Path;
 use std::sync::mpsc::SyncSender;
+use std::sync::{Arc, RwLock};
 use action::PluginAction;
 use gpui::{Global, Entity};
+use crate::settings::SettingsStore;
 
 pub struct PluginManagerGlobal(pub Entity<PluginManager>);
 impl Global for PluginManagerGlobal {}
@@ -17,14 +19,16 @@ pub struct PluginManager {
     runtime: runtime::PluginRuntime,
     plugins: Vec<runtime::PluginInstance>,
     action_tx: SyncSender<PluginAction>,
+    settings: Arc<RwLock<SettingsStore>>,
 }
 
 impl PluginManager {
-    pub fn new(action_tx: SyncSender<PluginAction>) -> Result<Self> {
+    pub fn new(action_tx: SyncSender<PluginAction>, settings: Arc<RwLock<SettingsStore>>) -> Result<Self> {
         Ok(Self {
             runtime: runtime::PluginRuntime::new()?,
             plugins: Vec::new(),
             action_tx,
+            settings,
         })
     }
 
@@ -58,7 +62,7 @@ impl PluginManager {
         let wasm_path = dir.join(wasm_file);
 
         if wasm_path.exists() {
-            let instance = self.runtime.load_plugin(&wasm_path, manifest.clone(), self.action_tx.clone())?;
+            let instance = self.runtime.load_plugin(&wasm_path, manifest.clone(), self.action_tx.clone(), self.settings.clone())?;
             self.plugins.push(instance);
             println!("Plugin loaded successfully: {} ({})", manifest.plugin.name, manifest.plugin.id);
         } else {
@@ -72,6 +76,13 @@ impl PluginManager {
         let event_json = match event {
             event::PluginEvent::FileOpened { path } => {
                 format!(r#"{{"event": "file_opened", "path": "{}"}}"#, path)
+            }
+            event::PluginEvent::ProcessOutput { id, stdout } => {
+                let stdout_escaped = stdout.replace("\"", "\\\"").replace("\n", "\\n");
+                format!(r#"{{"event": "process_output", "id": "{}", "stdout": "{}"}}"#, id, stdout_escaped)
+            }
+            event::PluginEvent::ProcessExited { id, code } => {
+                format!(r#"{{"event": "process_exited", "id": "{}", "code": {}}}"#, id, code)
             }
             _ => "{}".to_string()
         };

@@ -16,6 +16,7 @@ pub struct PluginInstance {
 pub struct HostState {
     pub plugin_id: String,
     pub action_tx: std::sync::mpsc::SyncSender<super::action::PluginAction>,
+    pub settings: std::sync::Arc<std::sync::RwLock<crate::settings::SettingsStore>>,
 }
 
 impl PluginRuntime {
@@ -24,7 +25,13 @@ impl PluginRuntime {
         Ok(Self { engine })
     }
 
-    pub fn load_plugin(&self, wasm_path: &Path, manifest: PluginManifest, action_tx: std::sync::mpsc::SyncSender<super::action::PluginAction>) -> Result<PluginInstance> {
+    pub fn load_plugin(
+        &self, 
+        wasm_path: &Path, 
+        manifest: PluginManifest, 
+        action_tx: std::sync::mpsc::SyncSender<super::action::PluginAction>,
+        settings: std::sync::Arc<std::sync::RwLock<crate::settings::SettingsStore>>
+    ) -> Result<PluginInstance> {
         let module = Module::from_file(&self.engine, wasm_path)
             .map_err(|e| anyhow::anyhow!("Failed to load wasm module: {}", e))?;
 
@@ -33,6 +40,7 @@ impl PluginRuntime {
             HostState {
                 plugin_id: manifest.plugin.id.clone(),
                 action_tx,
+                settings,
             },
         );
 
@@ -62,7 +70,7 @@ impl PluginRuntime {
                 }
             };
             
-            let response = super::api_router::handle_invoke(&caller.data().plugin_id, &request_str, &caller.data().action_tx);
+            let response = super::api_router::handle_invoke(&caller.data().plugin_id, &request_str, &caller.data().action_tx, &caller.data().settings);
             let response_bytes = response.into_bytes();
             let response_len = response_bytes.len() as i32;
             

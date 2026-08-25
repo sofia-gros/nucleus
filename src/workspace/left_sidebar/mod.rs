@@ -11,8 +11,7 @@ impl LeftSidebar {
 impl Render for LeftSidebar {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div()
-            .h_full()
-            .w(px(256.0))
+            .size_full()
             .bg(gpui::rgb(0x0f172a))
             .border_r_1()
             .border_color(gpui::rgb(0x1e293b))
