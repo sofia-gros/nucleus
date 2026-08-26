@@ -9,7 +9,7 @@ pub mod bottom_panel;
 pub mod editor_area;
 pub mod state;
 
-use std::sync::mpsc::Receiver;
+use std::path::PathBuf;
 use crate::plugin_manager::{action::PluginAction, event::PluginEvent, PluginManagerGlobal};
 
 use title_bar::TitleBar;
@@ -32,10 +32,11 @@ pub struct Workspace {
     title_bar: Entity<TitleBar>,
     status_bar: Entity<StatusBar>,
     activity_bar: Entity<ActivityBar>,
-    left_sidebar: Entity<LeftSidebar>,
-    right_sidebar: Entity<RightSidebar>,
-    bottom_panel: Entity<BottomPanel>,
-    editor_area: Entity<EditorArea>,
+    pub left_sidebar: Entity<LeftSidebar>,
+    pub right_sidebar: Entity<RightSidebar>,
+    pub bottom_panel: Entity<BottomPanel>,
+    pub editor_area: Entity<EditorArea>,
+    pub root_path: Option<PathBuf>,
     state: WorkspaceState,
     save_task: Option<Task<()>>,
     resizing_left: bool,
@@ -44,17 +45,27 @@ pub struct Workspace {
 }
 
 impl Workspace {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(root_path: Option<PathBuf>, cx: &mut Context<Self>) -> Self {
         let state = Self::load_state();
+        let left_sidebar = LeftSidebar::new(root_path.clone());
+        let left_sidebar_entity = cx.new(|_| left_sidebar);
+        
+        if let Some(p) = &root_path {
+            left_sidebar_entity.update(cx, |sidebar, cx| {
+                sidebar.set_root(Some(p.clone()), cx);
+            });
+        }
+        
         Self {
             focus_handle: cx.focus_handle(),
             title_bar: cx.new(|_| TitleBar::new()),
             status_bar: cx.new(|_| StatusBar::new()),
             activity_bar: cx.new(|_| ActivityBar::new()),
-            left_sidebar: cx.new(|_| LeftSidebar::new()),
+            left_sidebar: left_sidebar_entity,
             right_sidebar: cx.new(|_| RightSidebar::new()),
             bottom_panel: cx.new(|_| BottomPanel::new()),
             editor_area: cx.new(|_| EditorArea::new()),
+            root_path,
             state,
             save_task: None,
             resizing_left: false,

@@ -2,7 +2,7 @@ use gpui::*;
 use gpui_component::*;
 use workspace::Workspace;
 use plugin_manager::PluginManager;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use plugin_manager::PluginManagerGlobal;
 
@@ -10,6 +10,7 @@ pub mod editor;
 pub mod plugin_manager;
 pub mod workspace;
 pub mod settings;
+pub mod file_system;
 
 use settings::{SettingsStore, SettingsGlobal};
 use std::sync::{Arc, RwLock};
@@ -22,10 +23,11 @@ fn main() {
     let app = gpui_platform::application().with_assets(gpui_component_assets::Assets);
 
     app.run(move |cx| {
+        let settings_store_clone = settings_store.clone();
         cx.set_global(SettingsGlobal(settings_store));
 
         let pm_model = cx.new(|_cx| {
-            let mut pm = PluginManager::new(action_tx, settings_for_pm).unwrap();
+            let mut pm = PluginManager::new(action_tx.clone(), settings_for_pm).unwrap();
             if let Err(e) = pm.discover_and_load(Path::new("plugins")) {
                 eprintln!("Failed to load plugins: {}", e);
             }
@@ -42,16 +44,21 @@ fn main() {
             KeyBinding::new("ctrl-r", workspace::ToggleRightSidebar, None),
         ]);
 
-        cx.spawn(async move |app_cx| {
-            let _ = app_cx.update(|cx| {
-                let _ = cx.open_window(WindowOptions::default(), |window, cx| {
-                    let view = cx.new(|cx| Workspace::new(cx));
-                    view.update(cx, |workspace, _cx| {
-                        workspace.focus_handle.focus(window, _cx);
+        let window_cx = cx.to_async();
+        cx.spawn(|_cx: &mut gpui::AsyncApp| async move {
+            let root_path = window_cx.update(|_cx| {
+                settings_store_clone.read().unwrap().get("last_opened_workspace").and_then(|v| v.as_str().map(|s| PathBuf::from(s)))
+            });
+            
+            let _ = window_cx.update(|cx| {
+                let _ = cx.open_window(WindowOptions::default(), move |window, cx| {
+                    let view = cx.new(|cx| Workspace::new(root_path, cx));
+                    view.update(cx, |workspace, cx| {
+                        workspace.focus_handle.focus(window, cx);
                     });
                     
                     let view_clone = view.clone();
-                    spawn_plugin_event_loop(cx, action_rx, pm_model, view_clone);
+                    spawn_plugin_event_loop(cx, action_tx.clone(), action_rx, pm_model, view_clone);
 
                     // This first level on the window, should be a Root.
                     cx.new(|cx| Root::new(view, window, cx))
@@ -63,11 +70,12 @@ fn main() {
 
 fn spawn_plugin_event_loop(
     cx: &mut App,
+    action_tx: mpsc::SyncSender<plugin_manager::action::PluginAction>,
     action_rx: mpsc::Receiver<plugin_manager::action::PluginAction>,
     pm_model: gpui::Entity<PluginManager>,
     view_clone: gpui::Entity<Workspace>,
 ) {
-    cx.spawn(async move |mut app_cx| {
+    cx.spawn(async move |app_cx| {
         loop {
             while let Ok(action) = action_rx.try_recv() {
                 match action {
@@ -76,6 +84,49 @@ fn spawn_plugin_event_loop(
                             pm_model.update(cx, |pm, _| {
                                 pm.dispatch_event(plugin_manager::event::PluginEvent::ProcessOutput { id: id.clone(), stdout });
                                 pm.dispatch_event(plugin_manager::event::PluginEvent::ProcessExited { id, code });
+                            });
+                        });
+                    }
+                    plugin_manager::action::PluginAction::FileSystemRead { plugin_id: _, req_id, path } => {
+                        let tx = action_tx.clone();
+                        std::thread::spawn(move || {
+                            let result = std::fs::read_to_string(&path);
+                            let (content, error) = match result {
+                                Ok(c) => (Some(c), None),
+                                Err(e) => (None, Some(e.to_string())),
+                            };
+                            let _ = tx.send(plugin_manager::action::PluginAction::FileSystemReadComplete { req_id, content, error });
+                        });
+                    }
+                    plugin_manager::action::PluginAction::FileSystemWrite { plugin_id: _, req_id, path, content } => {
+                        let tx = action_tx.clone();
+                        std::thread::spawn(move || {
+                            let result = std::fs::write(&path, content);
+                            let error = match result {
+                                Ok(_) => None,
+                                Err(e) => Some(e.to_string()),
+                            };
+                            let _ = tx.send(plugin_manager::action::PluginAction::FileSystemWriteComplete { req_id, error });
+                        });
+                    }
+                    plugin_manager::action::PluginAction::FileSystemReadComplete { req_id, content, error } => {
+                        let _ = app_cx.update(|cx| {
+                            pm_model.update(cx, |pm, _| {
+                                pm.dispatch_event(plugin_manager::event::PluginEvent::FileSystemReadComplete { req_id, content, error });
+                            });
+                        });
+                    }
+                    plugin_manager::action::PluginAction::FileSystemWriteComplete { req_id, error } => {
+                        let _ = app_cx.update(|cx| {
+                            pm_model.update(cx, |pm, _| {
+                                pm.dispatch_event(plugin_manager::event::PluginEvent::FileSystemWriteComplete { req_id, error });
+                            });
+                        });
+                    }
+                    plugin_manager::action::PluginAction::RegisterCommand { plugin_id, command } => {
+                        let _ = app_cx.update(|cx| {
+                            pm_model.update(cx, |pm, _| {
+                                pm.register_command(plugin_id, command);
                             });
                         });
                     }

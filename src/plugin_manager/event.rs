@@ -8,4 +8,6 @@ pub enum PluginEvent {
     WorkspaceChanged,
     TerminalStarted,
     TerminalExited,
+    FileSystemReadComplete { req_id: String, content: Option<String>, error: Option<String> },
+    FileSystemWriteComplete { req_id: String, error: Option<String> },
 }

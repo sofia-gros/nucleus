@@ -10,7 +10,7 @@ impl EditorArea {
     pub fn new() -> Self {
         Self {
             _core_editor: CoreEditor::new(),
-            open_tabs: vec!["main.rs".to_string()],
+            open_tabs: vec![],
         }
     }
 
@@ -51,16 +51,28 @@ impl Render for EditorArea {
                     .children(tabs)
             )
             .child(
-                // Editor content placeholder
-                div().flex_grow(1.).p_4().child(
-                    div().text_sm().text_color(gpui::rgb(0x64748b)).child(
-                        if self.open_tabs.is_empty() {
-                            "// No tabs open"
-                        } else {
-                            "// Editor Content"
-                        }
+                if self.open_tabs.is_empty() {
+                    // Welcome screen
+                    div().flex_grow(1.).flex().flex_col().justify_center().items_center()
+                        .child(
+                            div().text_3xl().font_weight(FontWeight::BOLD).text_color(gpui::rgb(0x38bdf8))
+                                .child("Nucleus")
+                        )
+                        .child(
+                            div().mt_4().text_sm().text_color(gpui::rgb(0x94a3b8))
+                                .child("A next-generation IDE built with Rust & GPUI.")
+                        )
+                        .child(
+                            div().mt_8().flex().flex_col().items_center().text_sm().text_color(gpui::rgb(0x64748b))
+                                .child(div().child("No workspace opened."))
+                                .child(div().mt_2().child("Use 'File > Open Folder' to begin."))
+                        )
+                } else {
+                    // Editor content placeholder
+                    div().flex_grow(1.).p_4().child(
+                        div().text_sm().text_color(gpui::rgb(0x64748b)).child("// Editor Content")
                     )
-                )
+                }
             )
     }
 }

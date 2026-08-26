@@ -15,6 +15,7 @@ pub struct PluginInstance {
 
 pub struct HostState {
     pub plugin_id: String,
+    pub permissions: crate::plugin_manager::manifest::PluginPermissions,
     pub action_tx: std::sync::mpsc::SyncSender<super::action::PluginAction>,
     pub settings: std::sync::Arc<std::sync::RwLock<crate::settings::SettingsStore>>,
 }
@@ -39,6 +40,7 @@ impl PluginRuntime {
             &self.engine,
             HostState {
                 plugin_id: manifest.plugin.id.clone(),
+                permissions: manifest.permissions.clone(),
                 action_tx,
                 settings,
             },
@@ -70,7 +72,13 @@ impl PluginRuntime {
                 }
             };
             
-            let response = super::api_router::handle_invoke(&caller.data().plugin_id, &request_str, &caller.data().action_tx, &caller.data().settings);
+            let response = super::api_router::handle_invoke(
+                &caller.data().plugin_id, 
+                &request_str, 
+                &caller.data().action_tx, 
+                &caller.data().settings,
+                &caller.data().permissions
+            );
             let response_bytes = response.into_bytes();
             let response_len = response_bytes.len() as i32;
             

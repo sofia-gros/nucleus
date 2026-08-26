@@ -8,6 +8,7 @@ use anyhow::Result;
 use std::path::Path;
 use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, RwLock};
+use std::collections::HashMap;
 use action::PluginAction;
 use gpui::{Global, Entity};
 use crate::settings::SettingsStore;
@@ -20,6 +21,7 @@ pub struct PluginManager {
     plugins: Vec<runtime::PluginInstance>,
     action_tx: SyncSender<PluginAction>,
     settings: Arc<RwLock<SettingsStore>>,
+    pub commands: HashMap<String, String>, // command_name -> plugin_id
 }
 
 impl PluginManager {
@@ -29,6 +31,7 @@ impl PluginManager {
             plugins: Vec::new(),
             action_tx,
             settings,
+            commands: HashMap::new(),
         })
     }
 
@@ -84,6 +87,24 @@ impl PluginManager {
             event::PluginEvent::ProcessExited { id, code } => {
                 format!(r#"{{"event": "process_exited", "id": "{}", "code": {}}}"#, id, code)
             }
+            event::PluginEvent::FileSystemReadComplete { req_id, content, error } => {
+                let content_json = match content {
+                    Some(c) => format!(r#""{}""#, c.replace("\"", "\\\"").replace("\n", "\\n")),
+                    None => "null".to_string()
+                };
+                let error_json = match error {
+                    Some(e) => format!(r#""{}""#, e.replace("\"", "\\\"").replace("\n", "\\n")),
+                    None => "null".to_string()
+                };
+                format!(r#"{{"event": "fs_read_complete", "req_id": "{}", "content": {}, "error": {}}}"#, req_id, content_json, error_json)
+            }
+            event::PluginEvent::FileSystemWriteComplete { req_id, error } => {
+                let error_json = match error {
+                    Some(e) => format!(r#""{}""#, e.replace("\"", "\\\"").replace("\n", "\\n")),
+                    None => "null".to_string()
+                };
+                format!(r#"{{"event": "fs_write_complete", "req_id": "{}", "error": {}}}"#, req_id, error_json)
+            }
             _ => "{}".to_string()
         };
         
@@ -92,5 +113,10 @@ impl PluginManager {
                 eprintln!("Failed to dispatch event to plugin: {}", e);
             }
         }
+    }
+
+    pub fn register_command(&mut self, plugin_id: String, command: String) {
+        self.commands.insert(command.clone(), plugin_id.clone());
+        println!("Registered command '{}' for plugin '{}'", command, plugin_id);
     }
 }

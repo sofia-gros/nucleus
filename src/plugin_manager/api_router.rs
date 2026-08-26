@@ -6,7 +6,8 @@ pub fn handle_invoke(
     plugin_id: &str, 
     request_json: &str, 
     action_tx: &SyncSender<PluginAction>,
-    settings: &std::sync::RwLock<crate::settings::SettingsStore>
+    settings: &std::sync::RwLock<crate::settings::SettingsStore>,
+    permissions: &crate::plugin_manager::manifest::PluginPermissions,
 ) -> String {
     if let Ok(req) = serde_json::from_str::<Value>(request_json) {
         let api = req["api"].as_str().unwrap_or("");
@@ -49,6 +50,9 @@ pub fn handle_invoke(
                 r#"{"status": "queued"}"#.to_string()
             }
             "process.spawn" => {
+                if permissions.process.is_empty() {
+                    return r#"{"status": "error", "message": "Permission denied: process access not granted"}"#.to_string();
+                }
                 let id = req["args"]["id"].as_str().unwrap_or("unknown").to_string();
                 let command = req["args"]["command"].as_str().unwrap_or("").to_string();
                 let args: Vec<String> = req["args"]["args"].as_array().unwrap_or(&vec![]).iter().map(|v| v.as_str().unwrap_or("").to_string()).collect();
@@ -74,6 +78,41 @@ pub fn handle_invoke(
             }
             "terminal.clear" => {
                 if let Err(e) = action_tx.send(PluginAction::TerminalClear) {
+                    return format!(r#"{{"status": "error", "message": "Channel send failed: {}"}}"#, e);
+                }
+                r#"{"status": "queued"}"#.to_string()
+            }
+            "fs.read_file" => {
+                let path = req["args"]["path"].as_str().unwrap_or("").to_string();
+                let req_id = req["args"]["req_id"].as_str().unwrap_or("").to_string();
+                
+                if permissions.filesystem.is_empty() {
+                    return r#"{"status": "error", "message": "Permission denied: filesystem access not granted"}"#.to_string();
+                }
+
+                if let Err(e) = action_tx.send(PluginAction::FileSystemRead { plugin_id: plugin_id.to_string(), req_id, path }) {
+                    return format!(r#"{{"status": "error", "message": "Channel send failed: {}"}}"#, e);
+                }
+                r#"{"status": "queued"}"#.to_string()
+            }
+            "fs.write_file" => {
+                let path = req["args"]["path"].as_str().unwrap_or("").to_string();
+                let content = req["args"]["content"].as_str().unwrap_or("").to_string();
+                let req_id = req["args"]["req_id"].as_str().unwrap_or("").to_string();
+                
+                if permissions.filesystem.is_empty() {
+                    return r#"{"status": "error", "message": "Permission denied: filesystem access not granted"}"#.to_string();
+                }
+
+                if let Err(e) = action_tx.send(PluginAction::FileSystemWrite { plugin_id: plugin_id.to_string(), req_id, path, content }) {
+                    return format!(r#"{{"status": "error", "message": "Channel send failed: {}"}}"#, e);
+                }
+                r#"{"status": "queued"}"#.to_string()
+            }
+            "command.register" => {
+                let command = req["args"]["command"].as_str().unwrap_or("").to_string();
+                
+                if let Err(e) = action_tx.send(PluginAction::RegisterCommand { plugin_id: plugin_id.to_string(), command }) {
                     return format!(r#"{{"status": "error", "message": "Channel send failed: {}"}}"#, e);
                 }
                 r#"{"status": "queued"}"#.to_string()

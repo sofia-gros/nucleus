@@ -60,6 +60,17 @@ impl SettingsStore {
         }
     }
 
+    pub fn save_global(&self) {
+        if let Some(path) = Self::global_settings_path() {
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if let Ok(json_str) = serde_json::to_string_pretty(&self.global_settings) {
+                let _ = std::fs::write(path, json_str);
+            }
+        }
+    }
+
     pub fn get(&self, key: &str) -> Option<Value> {
         // Try workspace settings first
         let parts: Vec<&str> = key.split('.').collect();
@@ -104,6 +115,26 @@ impl SettingsStore {
         }
         
         self.save_workspace();
+    }
+
+    pub fn set_global(&mut self, key: &str, value: Value) {
+        let parts: Vec<&str> = key.split('.').collect();
+        if parts.is_empty() { return; }
+        
+        let mut current = &mut self.global_settings;
+        for i in 0..parts.len() - 1 {
+            let part = parts[i];
+            if !current.is_object() {
+                *current = json!({});
+            }
+            current = current.as_object_mut().unwrap().entry(part.to_string()).or_insert(json!({}));
+        }
+        
+        if let Some(obj) = current.as_object_mut() {
+            obj.insert(parts.last().unwrap().to_string(), value);
+        }
+        
+        self.save_global();
     }
 }
 
