@@ -5,6 +5,7 @@ use plugin_manager::PluginManager;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use plugin_manager::PluginManagerGlobal;
+use gpui_component::theme::{Theme, ThemeMode};
 
 pub mod editor;
 pub mod plugin_manager;
@@ -38,6 +39,14 @@ fn main() {
         // This must be called before using any GPUI Component features.
         gpui_component::init(cx);
 
+        // Sync theme with OS appearance
+        let appearance = cx.window_appearance();
+        let mode = match appearance {
+            WindowAppearance::Dark | WindowAppearance::VibrantDark => ThemeMode::Dark,
+            WindowAppearance::Light | WindowAppearance::VibrantLight => ThemeMode::Light,
+        };
+        Theme::change(mode, None, cx);
+
         cx.bind_keys([
             KeyBinding::new("ctrl-b", workspace::ToggleLeftSidebar, None),
             KeyBinding::new("ctrl-j", workspace::ToggleBottomPanel, None),
@@ -47,7 +56,26 @@ fn main() {
         let window_cx = cx.to_async();
         cx.spawn(|_cx: &mut gpui::AsyncApp| async move {
             let root_path = window_cx.update(|_cx| {
-                settings_store_clone.read().unwrap().get("last_opened_workspace").and_then(|v| v.as_str().map(|s| PathBuf::from(s)))
+                // Parse CLI arguments for root path
+                let args: Vec<String> = std::env::args().collect();
+                let cli_root = if args.len() > 1 {
+                    let arg = &args[1];
+                    if arg.starts_with("--root=") {
+                        Some(PathBuf::from(arg.trim_start_matches("--root=")))
+                    } else if !arg.starts_with("--") {
+                        Some(PathBuf::from(arg))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                if cli_root.is_some() {
+                    cli_root
+                } else {
+                    settings_store_clone.read().unwrap().get("last_opened_workspace").and_then(|v| v.as_str().map(|s| PathBuf::from(s)))
+                }
             });
             
             let _ = window_cx.update(|cx| {
@@ -127,6 +155,58 @@ fn spawn_plugin_event_loop(
                         let _ = app_cx.update(|cx| {
                             pm_model.update(cx, |pm, _| {
                                 pm.register_command(plugin_id, command);
+                            });
+                        });
+                    }
+                    plugin_manager::action::PluginAction::ExecuteCommand { command } => {
+                        let _ = app_cx.update(|cx| {
+                            pm_model.update(cx, |pm, _| {
+                                pm.dispatch_event(plugin_manager::event::PluginEvent::CommandExecuted { command });
+                            });
+                        });
+                    }
+                    plugin_manager::action::PluginAction::RegisterStatusBarItem { plugin_id, id, text, icon, command, align } => {
+                        let _ = app_cx.update(|cx| {
+                            pm_model.update(cx, |pm, cx| {
+                                let alignment = if align.to_lowercase() == "right" {
+                                    plugin_manager::ui::StatusBarAlignment::Right
+                                } else {
+                                    plugin_manager::ui::StatusBarAlignment::Left
+                                };
+                                pm.ui_registry.register_status_bar_item(plugin_manager::ui::StatusBarItem {
+                                    id, plugin_id, text, icon, command, alignment
+                                });
+                                cx.notify();
+                            });
+                        });
+                    }
+                    plugin_manager::action::PluginAction::RegisterActivityBarItem { plugin_id, id, icon, tooltip, command } => {
+                        let _ = app_cx.update(|cx| {
+                            pm_model.update(cx, |pm, cx| {
+                                pm.ui_registry.register_activity_bar_item(plugin_manager::ui::ActivityBarItem {
+                                    id, plugin_id, icon, tooltip, command
+                                });
+                                cx.notify();
+                            });
+                        });
+                    }
+                    plugin_manager::action::PluginAction::RegisterSidebarItem { plugin_id, id, title, ui_ast } => {
+                        let _ = app_cx.update(|cx| {
+                            pm_model.update(cx, |pm, cx| {
+                                pm.ui_registry.register_sidebar_item(plugin_manager::ui::SidebarItem {
+                                    id, plugin_id, title, ui_ast
+                                });
+                                cx.notify();
+                            });
+                        });
+                    }
+                    plugin_manager::action::PluginAction::RegisterPanelItem { plugin_id, id, title, ui_ast } => {
+                        let _ = app_cx.update(|cx| {
+                            pm_model.update(cx, |pm, cx| {
+                                pm.ui_registry.register_panel_item(plugin_manager::ui::PanelItem {
+                                    id, plugin_id, title, ui_ast
+                                });
+                                cx.notify();
                             });
                         });
                     }

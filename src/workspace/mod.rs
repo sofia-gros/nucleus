@@ -1,4 +1,5 @@
 use gpui::*;
+use gpui_component::theme::ActiveTheme;
 
 pub mod title_bar;
 pub mod status_bar;
@@ -237,7 +238,7 @@ impl Render for Workspace {
         div()
             .track_focus(&self.focus_handle)
             .size_full()
-            .bg(gpui::rgb(0x0f172a)) // Slate 900
+            .bg(cx.theme().background)
             .flex()
             .flex_col()
             .on_mouse_move(cx.listener(|workspace, event: &MouseMoveEvent, _window, cx| {

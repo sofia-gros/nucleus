@@ -3,6 +3,7 @@ pub mod runtime;
 pub mod api_router;
 pub mod action;
 pub mod event;
+pub mod ui;
 
 use anyhow::Result;
 use std::path::Path;
@@ -22,6 +23,7 @@ pub struct PluginManager {
     action_tx: SyncSender<PluginAction>,
     settings: Arc<RwLock<SettingsStore>>,
     pub commands: HashMap<String, String>, // command_name -> plugin_id
+    pub ui_registry: ui::UIExtensionRegistry,
 }
 
 impl PluginManager {
@@ -32,6 +34,7 @@ impl PluginManager {
             action_tx,
             settings,
             commands: HashMap::new(),
+            ui_registry: ui::UIExtensionRegistry::default(),
         })
     }
 
@@ -75,6 +78,10 @@ impl PluginManager {
         Ok(())
     }
 
+    pub fn dispatch_action(&self, action: PluginAction) {
+        let _ = self.action_tx.send(action);
+    }
+
     pub fn dispatch_event(&mut self, event: event::PluginEvent) {
         let event_json = match event {
             event::PluginEvent::FileOpened { path } => {
@@ -104,6 +111,10 @@ impl PluginManager {
                     None => "null".to_string()
                 };
                 format!(r#"{{"event": "fs_write_complete", "req_id": "{}", "error": {}}}"#, req_id, error_json)
+            }
+            event::PluginEvent::CommandExecuted { command } => {
+                let command_escaped = command.replace("\"", "\\\"");
+                format!(r#"{{"event": "command_execute", "command": "{}"}}"#, command_escaped)
             }
             _ => "{}".to_string()
         };

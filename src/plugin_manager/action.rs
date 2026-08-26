@@ -18,4 +18,9 @@ pub enum PluginAction {
     FileSystemReadComplete { req_id: String, content: Option<String>, error: Option<String> },
     FileSystemWriteComplete { req_id: String, error: Option<String> },
     RegisterCommand { plugin_id: String, command: String },
+    ExecuteCommand { command: String },
+    RegisterStatusBarItem { plugin_id: String, id: String, text: String, icon: Option<String>, command: Option<String>, align: String },
+    RegisterActivityBarItem { plugin_id: String, id: String, icon: String, tooltip: String, command: String },
+    RegisterSidebarItem { plugin_id: String, id: String, title: String, ui_ast: Value },
+    RegisterPanelItem { plugin_id: String, id: String, title: String, ui_ast: Value },
 }

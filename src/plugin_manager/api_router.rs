@@ -117,6 +117,49 @@ pub fn handle_invoke(
                 }
                 r#"{"status": "queued"}"#.to_string()
             }
+            "ui.register_status_bar_item" => {
+                let id = req["args"]["id"].as_str().unwrap_or("").to_string();
+                let text = req["args"]["text"].as_str().unwrap_or("").to_string();
+                let icon = req["args"]["icon"].as_str().map(|s| s.to_string());
+                let command = req["args"]["command"].as_str().map(|s| s.to_string());
+                let align = req["args"]["align"].as_str().unwrap_or("left").to_string();
+
+                if let Err(e) = action_tx.send(PluginAction::RegisterStatusBarItem { plugin_id: plugin_id.to_string(), id, text, icon, command, align }) {
+                    return format!(r#"{{"status": "error", "message": "Channel send failed: {}"}}"#, e);
+                }
+                r#"{"status": "queued"}"#.to_string()
+            }
+            "ui.register_activity_bar_item" => {
+                let id = req["args"]["id"].as_str().unwrap_or("").to_string();
+                let icon = req["args"]["icon"].as_str().unwrap_or("").to_string();
+                let tooltip = req["args"]["tooltip"].as_str().unwrap_or("").to_string();
+                let command = req["args"]["command"].as_str().unwrap_or("").to_string();
+
+                if let Err(e) = action_tx.send(PluginAction::RegisterActivityBarItem { plugin_id: plugin_id.to_string(), id, icon, tooltip, command }) {
+                    return format!(r#"{{"status": "error", "message": "Channel send failed: {}"}}"#, e);
+                }
+                r#"{"status": "queued"}"#.to_string()
+            }
+            "ui.register_sidebar" => {
+                let id = req["args"]["id"].as_str().unwrap_or("").to_string();
+                let title = req["args"]["title"].as_str().unwrap_or("Sidebar").to_string();
+                let ui_ast = req["args"]["ui"].clone();
+
+                if let Err(e) = action_tx.send(PluginAction::RegisterSidebarItem { plugin_id: plugin_id.to_string(), id, title, ui_ast }) {
+                    return format!(r#"{{"status": "error", "message": "Channel send failed: {}"}}"#, e);
+                }
+                r#"{"status": "queued"}"#.to_string()
+            }
+            "ui.register_panel" => {
+                let id = req["args"]["id"].as_str().unwrap_or("").to_string();
+                let title = req["args"]["title"].as_str().unwrap_or("Panel").to_string();
+                let ui_ast = req["args"]["ui"].clone();
+
+                if let Err(e) = action_tx.send(PluginAction::RegisterPanelItem { plugin_id: plugin_id.to_string(), id, title, ui_ast }) {
+                    return format!(r#"{{"status": "error", "message": "Channel send failed: {}"}}"#, e);
+                }
+                r#"{"status": "queued"}"#.to_string()
+            }
             _ => {
                 format!(r#"{{"status": "error", "message": "Unknown API: {}"}}"#, api)
             }

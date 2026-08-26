@@ -1,4 +1,5 @@
 use gpui::*;
+use gpui_component::theme::ActiveTheme;
 
 pub struct TitleBar;
 
@@ -9,16 +10,16 @@ impl TitleBar {
 }
 
 impl Render for TitleBar {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .w_full()
-            .h(px(32.0))
-            .bg(gpui::rgb(0x1e293b))
+            .h(gpui::px(32.0))
+            .bg(cx.theme().background)
             .flex()
             .items_center()
             .px_2()
             .child(
-                div().text_sm().text_color(gpui::rgb(0x94a3b8)).child("Nucleus IDE")
+                div().text_sm().text_color(cx.theme().muted_foreground).child("Nucleus IDE")
             )
     }
 }

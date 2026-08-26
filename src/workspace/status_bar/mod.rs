@@ -1,4 +1,5 @@
 use gpui::*;
+use gpui_component::theme::ActiveTheme;
 
 pub struct StatusBar;
 
@@ -9,17 +10,55 @@ impl StatusBar {
 }
 
 impl Render for StatusBar {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let mut left_items = Vec::new();
+        let mut right_items = Vec::new();
+
+        if cx.has_global::<crate::plugin_manager::PluginManagerGlobal>() {
+            let pm_global = cx.global::<crate::plugin_manager::PluginManagerGlobal>().0.clone();
+            let pm = pm_global.read(cx);
+            
+            for item in &pm.ui_registry.status_bar_items {
+                let text = item.text.clone();
+                // We could use icon rendering here if specified, for now fallback to text
+                let mut el = div()
+                    .px_3()
+                    .py_1()
+                    .text_color(cx.theme().muted_foreground)
+                    .hover(|s| s.bg(cx.theme().muted).text_color(cx.theme().foreground))
+                    .cursor_pointer()
+                    .child(text);
+                
+                if let Some(cmd) = item.command.clone() {
+                    el = el.on_mouse_down(MouseButton::Left, cx.listener(move |_bar, _event, _window, cx| {
+                        if cx.has_global::<crate::plugin_manager::PluginManagerGlobal>() {
+                            let pm_global = cx.global::<crate::plugin_manager::PluginManagerGlobal>().0.clone();
+                            pm_global.update(cx, |pm, _| {
+                                pm.dispatch_event(crate::plugin_manager::event::PluginEvent::CommandExecuted { command: cmd.clone() });
+                            });
+                        }
+                    }));
+                }
+
+                match item.alignment {
+                    crate::plugin_manager::ui::StatusBarAlignment::Left => left_items.push(el),
+                    crate::plugin_manager::ui::StatusBarAlignment::Right => right_items.push(el),
+                }
+            }
+        }
+
         div()
             .w_full()
-            .h(px(24.0))
-            .bg(gpui::rgb(0x0f172a))
-            // using solid background for now to simulate border-top visually if border is tricky
+            .h(gpui::px(24.0))
+            .bg(cx.theme().background)
             .flex()
             .items_center()
-            .px_2()
+            .justify_between()
             .child(
-                div().text_sm().text_color(gpui::rgb(0x64748b)).child("Ready")
+                div().flex().items_center().children(left_items)
+            )
+            .child(
+                div().flex().items_center().children(right_items)
             )
     }
 }

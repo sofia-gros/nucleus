@@ -10,4 +10,5 @@ pub enum PluginEvent {
     TerminalExited,
     FileSystemReadComplete { req_id: String, content: Option<String>, error: Option<String> },
     FileSystemWriteComplete { req_id: String, error: Option<String> },
+    CommandExecuted { command: String },
 }

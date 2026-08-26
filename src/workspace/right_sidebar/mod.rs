@@ -1,4 +1,6 @@
 use gpui::*;
+use crate::plugin_manager::{PluginManagerGlobal, ui::PanelItem};
+use gpui_component::theme::ActiveTheme;
 
 pub struct RightSidebar;
 
@@ -9,15 +11,15 @@ impl RightSidebar {
 }
 
 impl Render for RightSidebar {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
-            .size_full()
-            .bg(gpui::rgb(0x0f172a))
+            .w(gpui::px(250.0))
+            .bg(cx.theme().background)
             .border_l_1()
-            .border_color(gpui::rgb(0x1e293b))
-            .p_2()
+            .border_color(cx.theme().border)
+            .flex()
             .child(
-                div().text_sm().text_color(gpui::rgb(0x64748b)).child("AI / Plugins")
+                div().text_sm().text_color(cx.theme().muted_foreground).child("AI / Plugins")
             )
     }
 }
