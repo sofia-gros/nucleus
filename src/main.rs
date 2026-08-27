@@ -79,7 +79,13 @@ fn main() {
             });
             
             let _ = window_cx.update(|cx| {
-                let _ = cx.open_window(WindowOptions::default(), move |window, cx| {
+                let mut options = WindowOptions::default();
+                options.titlebar = Some(gpui::TitlebarOptions {
+                    title: None,
+                    appears_transparent: true,
+                    traffic_light_position: None,
+                });
+                let _ = cx.open_window(options, move |window, cx| {
                     let view = cx.new(|cx| Workspace::new(root_path, cx));
                     view.update(cx, |workspace, cx| {
                         workspace.focus_handle.focus(window, cx);

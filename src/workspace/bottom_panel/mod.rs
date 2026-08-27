@@ -25,9 +25,18 @@ impl Render for BottomPanel {
             div().px_4().py_1().border_r_1().border_color(cx.theme().border).text_sm().text_color(cx.theme().muted_foreground).child("PROBLEMS").into_any_element(),
         ];
         
-        let mut contents = vec![
-            div().p_4().text_sm().text_color(cx.theme().muted_foreground).child("> _").into_any_element()
-        ];
+        let mut contents = vec![];
+        if self.logs.is_empty() {
+            contents.push(div().p_4().text_sm().text_color(cx.theme().muted_foreground).child("> _").into_any_element());
+        } else {
+            let mut log_list = div().flex().flex_col().p_4().overflow_hidden().h_full();
+            for log in &self.logs {
+                log_list = log_list.child(
+                    div().text_sm().text_color(cx.theme().foreground).child(log.clone())
+                );
+            }
+            contents.push(log_list.into_any_element());
+        }
 
         if cx.has_global::<PluginManagerGlobal>() {
             let pm_global = cx.global::<PluginManagerGlobal>().0.clone();

@@ -75,6 +75,12 @@ impl Render for EditorArea {
                 .into_any_element();
         }
 
+        let active_tab_title = if self.active_tab < self.tabs.len() {
+            self.tabs[self.active_tab].1.clone()
+        } else {
+            String::new()
+        };
+
         let mut tab_bar = TabBar::new("editor-tabs")
             .w_full()
             .selected_index(self.active_tab)
@@ -83,19 +89,51 @@ impl Render for EditorArea {
                 cx.notify();
             }));
 
-        for (idx, (_, title, _)) in self.tabs.iter().enumerate() {
+        for (_idx, (_, title, _)) in self.tabs.iter().enumerate() {
             tab_bar = tab_bar.child(title.clone());
         }
 
         // Initialize pending tabs
-        for (idx, (path, _title, state_opt)) in self.tabs.iter_mut().enumerate() {
+        for (_idx, (path, _title, state_opt)) in self.tabs.iter_mut().enumerate() {
             if state_opt.is_none() {
                 if let Some(content) = self.pending_contents.remove(path) {
+                    let ext = std::path::Path::new(path)
+                        .extension()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("");
+                    let lang = match ext {
+                        "rs" => "rust",
+                        "js" | "jsx" => "javascript",
+                        "ts" | "tsx" => "typescript",
+                        "html" => "html",
+                        "css" => "css",
+                        "json" => "json",
+                        "toml" => "toml",
+                        "md" => "markdown",
+                        "py" => "python",
+                        "go" => "go",
+                        "c" => "c",
+                        "cpp" | "cc" | "cxx" => "cpp",
+                        _ => "plaintext",
+                    };
+                    
                     let editor_state = cx.new(|cx| {
-                        EditorState::new(_window, cx)
-                            .language("rust")
+                        let mut state = EditorState::new(_window, cx)
+                            .language(lang)
                             .folding(true)
-                            .default_value(&content)
+                            .default_value(&content);
+                        // Install a factory that returns our highlighter
+                        state.set_highlighter_factory(std::rc::Rc::new(|lang: &str| {
+                            if let Some(h) = highlighter::SyntectHighlighter::new(lang) {
+                                Some(Box::new(h) as Box<dyn gpui_component::input::InputHighlighter>)
+                            } else {
+                                None
+                            }
+                        }), cx);
+                        let mut editor_style = gpui_base::input::InputEditorStyle::default();
+                        editor_style.highlight_styles = std::sync::Arc::new(highlighter::ShowcaseHighlightStyles::default());
+                        state.set_editor_style(editor_style);
+                        state
                     });
                     *state_opt = Some(editor_state);
                 }
@@ -118,10 +156,28 @@ impl Render for EditorArea {
             .flex_col()
             .bg(cx.theme().background)
             .child(
-                div().w_full().bg(cx.theme().background)
+                div().w_full().flex().items_center().justify_between().bg(cx.theme().background)
                     .border_b_1()
                     .border_color(cx.theme().border)
-                    .child(tab_bar)
+                    .child(div().flex_grow(1.).overflow_hidden().child(tab_bar))
+                    .child(
+                        div()
+                            .id("close-tab-btn")
+                            .px_3()
+                            .h_full()
+                            .flex()
+                            .items_center()
+                            .text_color(cx.theme().muted_foreground)
+                            .hover(|s| s.bg(gpui::rgb(0xe81123)).text_color(gpui::rgb(0xffffff)))
+                            .cursor_pointer()
+                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                if !this.tabs.is_empty() {
+                                    this.pending_close_tab = Some(this.active_tab);
+                                    cx.notify();
+                                }
+                            }))
+                            .child("✕")
+                    )
             )
             .child(
                 div().flex_grow(1.).w_full().child(active_editor)

@@ -13,7 +13,8 @@ impl RightSidebar {
 impl Render for RightSidebar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
-            .w(gpui::px(250.0))
+            .size_full()
+            .p_4()
             .bg(cx.theme().background)
             .border_l_1()
             .border_color(cx.theme().border)

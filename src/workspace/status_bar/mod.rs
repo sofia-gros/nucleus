@@ -58,7 +58,11 @@ impl Render for StatusBar {
                 div().flex().items_center().children(left_items)
             )
             .child(
-                div().flex().items_center().children(right_items)
+                div().flex().items_center()
+                    .children(right_items)
+                    .child(div().px_3().text_color(cx.theme().muted_foreground).child("Ln 1, Col 1"))
+                    .child(div().px_3().text_color(cx.theme().muted_foreground).child("UTF-8"))
+                    .child(div().px_3().text_color(cx.theme().muted_foreground).child("Rust"))
             )
     }
 }

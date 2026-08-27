@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Range, sync::LazyLock};
+use std::{collections::HashMap, ops::Range, sync::{LazyLock, RwLock}};
 
 use gpui::{Context, HighlightStyle, SharedString, Window, rgb};
 use gpui_component::input::{
@@ -11,7 +11,20 @@ use syntect::{
 
 /// Loading the default syntax definitions deserializes a few megabytes, so share
 /// one set across every highlighter instance.
-static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+static SYNTAX_SET: LazyLock<RwLock<SyntaxSet>> = LazyLock::new(|| RwLock::new(SyntaxSet::load_defaults_newlines()));
+
+pub fn load_syntaxes_from_folder(path: &std::path::Path) -> Result<(), String> {
+    let mut builder = {
+        let set = SYNTAX_SET.read().unwrap();
+        set.clone().into_builder()
+    };
+    
+    builder.add_from_folder(path, true).map_err(|e| e.to_string())?;
+    
+    let new_set = builder.build();
+    *SYNTAX_SET.write().unwrap() = new_set;
+    Ok(())
+}
 
 /// A small, WASM-compatible example adapter for Base's parser-independent
 /// highlighting API. Syntect identifies scopes; the application-owned resolver
@@ -28,7 +41,9 @@ pub struct SyntectHighlighter {
 
 impl SyntectHighlighter {
     pub fn new(language: &str) -> Option<Self> {
-        find_syntax(language)?;
+        if !syntax_exists(language) {
+            return None;
+        }
 
         Some(Self {
             language: language.to_owned().into(),
@@ -55,10 +70,11 @@ impl SyntectHighlighter {
     }
 }
 
-fn find_syntax(language: &str) -> Option<&'static SyntaxReference> {
-    SYNTAX_SET
-        .find_syntax_by_token(language)
-        .or_else(|| SYNTAX_SET.find_syntax_by_extension(language))
+fn syntax_exists(language: &str) -> bool {
+    let set = SYNTAX_SET.read().unwrap();
+    set.find_syntax_by_token(language)
+        .or_else(|| set.find_syntax_by_extension(language))
+        .is_some()
 }
 
 impl InputHighlighter for SyntectHighlighter {
@@ -77,15 +93,18 @@ impl InputHighlighter for SyntectHighlighter {
         // `syntect` has no incremental mode, so the whole document is reparsed.
         // Read the rope once and reuse that string for folding too.
         let text = text.to_string();
-        let syntax = find_syntax(self.language.as_ref())
-            .unwrap_or_else(|| SYNTAX_SET.find_syntax_plain_text());
+        let set = SYNTAX_SET.read().unwrap();
+        let syntax = set
+            .find_syntax_by_token(self.language.as_ref())
+            .or_else(|| set.find_syntax_by_extension(self.language.as_ref()))
+            .unwrap_or_else(|| set.find_syntax_plain_text());
         let mut parser = ParseState::new(syntax);
         let mut scopes = ScopeStack::new();
         let mut offset = 0;
         self.highlights.clear();
 
         for line in LinesWithEndings::from(&text) {
-            if let Ok(operations) = parser.parse_line(line, &SYNTAX_SET) {
+            if let Ok(operations) = parser.parse_line(line, &*set) {
                 let mut cursor = 0;
                 for (index, operation) in operations {
                     self.push_highlight(offset + cursor..offset + index, &scopes);

@@ -1,0 +1,9 @@
+[plugin]
+api_version = "1"
+id = "example.toml"
+name = "TOML Syntax"
+version = "0.1.0"
+description = "Provides TOML syntax highlighting"
+
+# No WASM file is needed for this plugin
+[runtime]

@@ -150,6 +150,37 @@ impl Render for LeftSidebar {
                         if t == "text" {
                             let val = map.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
                             div().p_2().text_sm().text_color(cx.theme().foreground).child(val).into_any_element()
+                        } else if t == "tree" {
+                            let mut list = div().flex().flex_col().w_full();
+                            if let Some(serde_json::Value::Array(nodes)) = map.get("nodes") {
+                                for node in nodes {
+                                    let label = node.get("label").and_then(|l| l.as_str()).unwrap_or("").to_string();
+                                    let node_icon = node.get("icon").and_then(|i| i.as_str()).unwrap_or("");
+                                    let icon_name = match node_icon {
+                                        "file" => IconName::File,
+                                        "folder" => IconName::Folder,
+                                        "plus" => IconName::Plus,
+                                        "minus" => IconName::Minus,
+                                        "git-commit" => IconName::File,
+                                        "git-branch" => IconName::File,
+                                        "git-merge" => IconName::File,
+                                        _ => IconName::File,
+                                    };
+                                    
+                                    list = list.child(
+                                        h_flex()
+                                            .gap_2()
+                                            .px_2()
+                                            .py_1()
+                                            .w_full()
+                                            .hover(|s| s.bg(cx.theme().secondary))
+                                            .cursor_pointer()
+                                            .child(Icon::new(icon_name))
+                                            .child(div().text_sm().text_color(cx.theme().foreground).child(label))
+                                    );
+                                }
+                            }
+                            list.into_any_element()
                         } else {
                             div().p_2().text_sm().text_color(gpui::rgb(0xef4444)).child(format!("Unsupported UI type: {}", t)).into_any_element()
                         }

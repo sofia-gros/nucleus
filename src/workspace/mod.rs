@@ -247,14 +247,16 @@ impl Render for Workspace {
                     workspace.state.left_sidebar_width = (f32::from(event.position.x) - 48.0).max(100.0).min(800.0);
                     changed = true;
                 }
-                if let Some((start_x, start_w)) = workspace.resizing_right {
-                    let delta = start_x - f32::from(event.position.x);
-                    workspace.state.right_sidebar_width = (start_w + delta).max(100.0).min(800.0);
+                if let Some((start_x, _)) = workspace.resizing_right.as_mut() {
+                    let delta = *start_x - f32::from(event.position.x);
+                    workspace.state.right_sidebar_width = (workspace.state.right_sidebar_width + delta).max(100.0).min(800.0);
+                    *start_x = f32::from(event.position.x);
                     changed = true;
                 }
-                if let Some((start_y, start_h)) = workspace.resizing_bottom {
-                    let delta = start_y - f32::from(event.position.y);
-                    workspace.state.bottom_panel_height = (start_h + delta).max(100.0).min(600.0);
+                if let Some((start_y, _)) = workspace.resizing_bottom.as_mut() {
+                    let delta = *start_y - f32::from(event.position.y);
+                    workspace.state.bottom_panel_height = (workspace.state.bottom_panel_height + delta).max(100.0).min(600.0);
+                    *start_y = f32::from(event.position.y);
                     changed = true;
                 }
                 if changed {
@@ -291,9 +293,9 @@ impl Render for Workspace {
                     .child(self.activity_bar.clone())
                     .children(self.render_left_sidebar(cx))
                     .child(
-                        div().flex_grow(1.).flex().flex_col()
+                        div().flex_1().overflow_hidden().flex().flex_col()
                             .child(
-                                gpui::div().flex_grow(1.)
+                                gpui::div().flex_1().overflow_hidden()
                                     .child(self.editor_area.clone())
                             )
                             .children(self.render_bottom_panel(cx))

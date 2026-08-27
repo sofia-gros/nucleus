@@ -64,15 +64,33 @@ impl PluginManager {
         let content = std::fs::read_to_string(&manifest_path)?;
         let manifest = manifest::PluginManifest::parse(&content)?;
 
-        let wasm_file = manifest.runtime.wasm.as_deref().unwrap_or("plugin.wasm");
-        let wasm_path = dir.join(wasm_file);
-
-        if wasm_path.exists() {
-            let instance = self.runtime.load_plugin(&wasm_path, manifest.clone(), self.action_tx.clone(), self.settings.clone())?;
-            self.plugins.push(instance);
-            println!("Plugin loaded successfully: {} ({})", manifest.plugin.name, manifest.plugin.id);
+        if let Some(wasm_file) = &manifest.runtime.wasm {
+            let wasm_path = dir.join(wasm_file);
+            if wasm_path.exists() {
+                let instance = self.runtime.load_plugin(&wasm_path, manifest.clone(), self.action_tx.clone(), self.settings.clone())?;
+                self.plugins.push(instance);
+                println!("Plugin loaded successfully: {} ({})", manifest.plugin.name, manifest.plugin.id);
+            } else {
+                eprintln!("WASM file not found for plugin {}: {}", manifest.plugin.id, wasm_path.display());
+            }
         } else {
-            eprintln!("WASM file not found for plugin {}: {}", manifest.plugin.id, wasm_path.display());
+            // Optional: fallback to plugin.wasm if it exists
+            let wasm_path = dir.join("plugin.wasm");
+            if wasm_path.exists() {
+                if let Ok(instance) = self.runtime.load_plugin(&wasm_path, manifest.clone(), self.action_tx.clone(), self.settings.clone()) {
+                    self.plugins.push(instance);
+                    println!("Plugin loaded successfully: {} ({})", manifest.plugin.name, manifest.plugin.id);
+                }
+            }
+        }
+
+        let syntaxes_dir = dir.join("syntaxes");
+        if syntaxes_dir.exists() && syntaxes_dir.is_dir() {
+            if let Err(e) = crate::workspace::editor_area::highlighter::load_syntaxes_from_folder(&syntaxes_dir) {
+                eprintln!("Failed to load syntaxes for plugin {}: {}", manifest.plugin.id, e);
+            } else {
+                println!("Loaded syntaxes for plugin: {}", manifest.plugin.id);
+            }
         }
         
         Ok(())
