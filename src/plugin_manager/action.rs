@@ -2,7 +2,7 @@ use serde_json::Value;
 
 pub enum PluginAction {
     OpenFile { path: String },
-    OpenTab { title: String, content: String },
+    OpenTab { path: String, title: String, content: String },
     CloseTab { title: String },
     FocusEditor,
     ShowNotification { message: String },

@@ -64,7 +64,10 @@ impl LeftSidebar {
             if let Some(children) = &entry.children {
                 item = item.children(Self::convert_to_tree_items(children));
             } else if entry.file_type == FileType::Directory {
-                // To allow expansion, we might need a dummy child or we handle expansion manually
+                // Leaf directory, but needs to be recognized as folder in GPUI Tree
+                // GPUI Tree requires at least one child to be recognized as a folder via is_folder().
+                // However, we just need the tree state to be able to expand it.
+                // We don't add dummy items so it doesn't show "loading" forever.
             }
             item
         }).collect()
@@ -90,7 +93,9 @@ impl Render for LeftSidebar {
                             IconName::Folder
                         };
 
-                        ListItem::new(ix)
+                        let is_folder = entry.is_folder();
+                        let path = item.id.clone();
+                        let mut list_item = ListItem::new(ix)
                             .w_full()
                             .rounded(cx.theme().radius)
                             .px_3()
@@ -100,32 +105,28 @@ impl Render for LeftSidebar {
                                     .gap_2()
                                     .child(Icon::new(icon))
                                     .child(div().text_sm().text_color(cx.theme().foreground).child(item.label.clone())),
-                            )
-                            .on_click(cx.listener({
-                                let path = item.id.clone();
-                                let is_folder = entry.is_folder();
-                                move |this, _, _window, cx| {
-                                    if is_folder {
-                                        // toggle expand not fully implemented with Tree component in this simple example
-                                        println!("Folder clicked: {}", path);
-                                    } else {
-                                        // Open file
-                                        if let Ok(content) = std::fs::read_to_string(path.as_ref()) {
-                                            let title = Path::new(path.as_ref()).file_name().unwrap_or_default().to_string_lossy().to_string();
-                                            // We need to send an event to workspace. For now, use PluginManager Action queue as a simple bus
-                                            if cx.has_global::<crate::plugin_manager::PluginManagerGlobal>() {
-                                                let pm_global = cx.global::<crate::plugin_manager::PluginManagerGlobal>().0.clone();
-                                                pm_global.update(cx, |pm, _cx| {
-                                                    pm.dispatch_action(crate::plugin_manager::action::PluginAction::OpenTab {
-                                                        title,
-                                                        content,
-                                                    });
+                            );
+
+                        if !is_folder {
+                            list_item = list_item.on_click(cx.listener({
+                                move |_this, _, _window, cx| {
+                                    if let Ok(content) = std::fs::read_to_string(path.as_ref()) {
+                                        let title = Path::new(path.as_ref()).file_name().unwrap_or_default().to_string_lossy().to_string();
+                                        if cx.has_global::<crate::plugin_manager::PluginManagerGlobal>() {
+                                            let pm_global = cx.global::<crate::plugin_manager::PluginManagerGlobal>().0.clone();
+                                            pm_global.update(cx, |pm, _cx| {
+                                                pm.dispatch_action(crate::plugin_manager::action::PluginAction::OpenTab {
+                                                    path: path.to_string(),
+                                                    title,
+                                                    content,
                                                 });
-                                            }
+                                            });
                                         }
                                     }
                                 }
-                            }))
+                            }));
+                        }
+                        list_item
                     })
                 },
             ).into_any_element()

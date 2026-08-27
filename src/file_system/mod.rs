@@ -38,10 +38,27 @@ impl FileEntry {
     }
 
     pub fn read_dir(path: &Path) -> Option<Vec<FileEntry>> {
+        Self::read_dir_with_depth(path, 0)
+    }
+
+    fn read_dir_with_depth(path: &Path, depth: usize) -> Option<Vec<FileEntry>> {
+        if depth > 5 {
+            return None; // Max depth
+        }
+
         let mut entries = Vec::new();
         if let Ok(dir) = fs::read_dir(path) {
             for entry in dir.filter_map(Result::ok) {
-                entries.push(FileEntry::new(entry.path()));
+                let file_name = entry.file_name().to_string_lossy().to_string();
+                if file_name == ".git" || file_name == "target" || file_name == "node_modules" {
+                    continue;
+                }
+                
+                let mut fe = FileEntry::new(entry.path());
+                if fe.file_type == FileType::Directory {
+                    fe.children = Self::read_dir_with_depth(&entry.path(), depth + 1);
+                }
+                entries.push(fe);
             }
             // Sort: directories first, then alphabetical
             entries.sort_by(|a, b| {

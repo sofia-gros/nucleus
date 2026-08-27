@@ -18,9 +18,10 @@ pub fn handle_invoke(
             }
             "editor.open_tab" => {
                 let title = req["args"]["title"].as_str().unwrap_or("Untitled").to_string();
+                let path = req["args"]["path"].as_str().unwrap_or(&title).to_string();
                 let content = req["args"]["content"].as_str().unwrap_or("").to_string();
                 
-                if let Err(e) = action_tx.send(PluginAction::OpenTab { title, content }) {
+                if let Err(e) = action_tx.send(PluginAction::OpenTab { path, title, content }) {
                     return format!(r#"{{"status": "error", "message": "Channel send failed: {}"}}"#, e);
                 }
                 r#"{"status": "queued"}"#.to_string()

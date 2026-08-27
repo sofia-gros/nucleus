@@ -118,9 +118,9 @@ impl Workspace {
 
     pub fn handle_action(&mut self, action: PluginAction, cx: &mut Context<Self>) {
         match action {
-            PluginAction::OpenTab { title, content } => {
+            PluginAction::OpenTab { path, title, content } => {
                 self.editor_area.update(cx, |editor, cx| {
-                    editor.open_tab(title.clone(), content, cx);
+                    editor.open_tab(path, title.clone(), content, cx);
                 });
                 
                 if cx.has_global::<PluginManagerGlobal>() {
