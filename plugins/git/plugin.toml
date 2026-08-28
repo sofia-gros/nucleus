@@ -1,8 +1,14 @@
 [plugin]
-id = "nucleus_git"
-name = "Git Extension"
+id = "nucleus.git"
+name = "Git Source Control"
 version = "0.1.0"
 api_version = "1"
+description = "Official built-in Git Source Control integration for Nucleus"
+author = "Nucleus Core Team"
+
+[runtime]
+wasm = "git_plugin.wasm"
 
 [permissions]
-process = ["git"]
+filesystem = ["read"]
+process = ["spawn"]

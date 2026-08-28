@@ -1,5 +1,8 @@
+/// プラグインとホスト間のアクションメッセージ定義モジュール
+
 use serde_json::Value;
 
+/// プラグインからホストに対して発行されるアクション
 pub enum PluginAction {
     OpenFile { path: String },
     OpenTab { path: String, title: String, content: String },
@@ -22,5 +25,6 @@ pub enum PluginAction {
     RegisterStatusBarItem { plugin_id: String, id: String, text: String, icon: Option<String>, command: Option<String>, align: String },
     RegisterActivityBarItem { plugin_id: String, id: String, icon: String, tooltip: String, command: String },
     RegisterSidebarItem { plugin_id: String, id: String, title: String, ui_ast: Value },
+    UpdateSidebarItem { plugin_id: String, id: String, title: Option<String>, ui_ast: Value },
     RegisterPanelItem { plugin_id: String, id: String, title: String, ui_ast: Value },
 }

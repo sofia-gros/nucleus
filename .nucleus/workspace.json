@@ -1,3 +1,32 @@
 {
-  "theme": "light"
+  "theme": "light",
+  "test_key": "test_val",
+  "git": {
+    "status": {
+      ".nucleus/state.json": "M",
+      ".nucleus/workspace.json": "M",
+      "docs/ROADMAP.md": "M",
+      "image1.png": "D",
+      "image2.png": "D",
+      "plugins/git/Cargo.lock": "M",
+      "plugins/git/Cargo.toml": "M",
+      "plugins/git/plugin.toml": "M",
+      "plugins/git/src/lib.rs": "M",
+      "plugins/toml-syntax/syntaxes/TOML.sublime-syntax": "M",
+      "src/main.rs": "M",
+      "src/plugin_manager/action.rs": "M",
+      "src/plugin_manager/api_router.rs": "M",
+      "src/plugin_manager/manifest.rs": "M",
+      "src/plugin_manager/mod.rs": "M",
+      "src/plugin_manager/ui.rs": "M",
+      "src/workspace/activity_bar/mod.rs": "M",
+      "src/workspace/editor_area/highlighter.rs": "M",
+      "src/workspace/editor_area/mod.rs": "M",
+      "src/workspace/left_sidebar/mod.rs": "M",
+      "src/workspace/status_bar/mod.rs": "M",
+      "src/workspace/title_bar/mod.rs": "M",
+      "image.png": "U",
+      "plugins/git/git_plugin.wasm": "U"
+    }
+  }
 }

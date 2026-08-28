@@ -74,6 +74,7 @@ fn syntax_exists(language: &str) -> bool {
     let set = SYNTAX_SET.read().unwrap();
     set.find_syntax_by_token(language)
         .or_else(|| set.find_syntax_by_extension(language))
+        .or_else(|| set.find_syntax_by_name(language))
         .is_some()
 }
 
@@ -97,6 +98,7 @@ impl InputHighlighter for SyntectHighlighter {
         let syntax = set
             .find_syntax_by_token(self.language.as_ref())
             .or_else(|| set.find_syntax_by_extension(self.language.as_ref()))
+            .or_else(|| set.find_syntax_by_name(self.language.as_ref()))
             .unwrap_or_else(|| set.find_syntax_plain_text());
         let mut parser = ParseState::new(syntax);
         let mut scopes = ScopeStack::new();

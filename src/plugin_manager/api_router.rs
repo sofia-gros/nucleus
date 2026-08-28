@@ -1,7 +1,10 @@
+/// プラグインからのホスト API 呼び出しをディスパッチするルーターモジュール
+
 use serde_json::Value;
 use std::sync::mpsc::SyncSender;
 use super::action::PluginAction;
 
+/// プラグインからの JSON API リクエストを処理し、レスポンス JSON を返す
 pub fn handle_invoke(
     plugin_id: &str, 
     request_json: &str, 
@@ -16,7 +19,19 @@ pub fn handle_invoke(
             "system.ping" => {
                 r#"{"status": "ok", "result": "pong"}"#.to_string()
             }
-            "editor.open_tab" => {
+            "workspace.get_root_path" => {
+                let store = settings.read().unwrap();
+                let root_opt = store.get("last_opened_workspace")
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+                    .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()));
+
+                if let Some(path) = root_opt {
+                    format!(r#"{{"status": "ok", "path": "{}"}}"#, path.replace("\\", "/"))
+                } else {
+                    r#"{"status": "ok", "path": null}"#.to_string()
+                }
+            }
+            "editor.open_tab" | "workspace.open_tab" => {
                 let title = req["args"]["title"].as_str().unwrap_or("Untitled").to_string();
                 let path = req["args"]["path"].as_str().unwrap_or(&title).to_string();
                 let content = req["args"]["content"].as_str().unwrap_or("").to_string();
@@ -25,6 +40,13 @@ pub fn handle_invoke(
                     return format!(r#"{{"status": "error", "message": "Channel send failed: {}"}}"#, e);
                 }
                 r#"{"status": "queued"}"#.to_string()
+            }
+            "workspace.show_notification" => {
+                let message = req["args"]["message"].as_str().unwrap_or("").to_string();
+                if let Err(e) = action_tx.send(PluginAction::ShowNotification { message }) {
+                    return format!(r#"{{"status": "error", "message": "Channel send failed: {}"}}"#, e);
+                }
+                r#"{"status": "ok"}"#.to_string()
             }
             "panel.open" => {
                 let id = req["args"]["id"].as_str().unwrap_or("unknown").to_string();
@@ -50,6 +72,40 @@ pub fn handle_invoke(
                 }
                 r#"{"status": "queued"}"#.to_string()
             }
+            "process.exec" => {
+                // 同期プロセス実行（結果を即座に返す）
+                if permissions.process.is_empty() {
+                    return r#"{"status": "error", "message": "Permission denied: process access not granted"}"#.to_string();
+                }
+                let command = req["args"]["command"].as_str().unwrap_or("");
+                let args: Vec<String> = req["args"]["args"].as_array().unwrap_or(&vec![]).iter().map(|v| v.as_str().unwrap_or("").to_string()).collect();
+                let cwd = req["args"]["cwd"].as_str();
+
+                let mut cmd = std::process::Command::new(command);
+                cmd.args(&args);
+                if let Some(dir) = cwd {
+                    cmd.current_dir(dir);
+                }
+
+                match cmd.output() {
+                    Ok(output) => {
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        let code = output.status.code().unwrap_or(-1);
+
+                        let json_val = serde_json::json!({
+                            "status": "ok",
+                            "code": code,
+                            "stdout": stdout,
+                            "stderr": stderr,
+                        });
+                        serde_json::to_string(&json_val).unwrap_or_else(|_| r#"{"status": "error"}"#.to_string())
+                    }
+                    Err(e) => {
+                        format!(r#"{{"status": "error", "message": "{}"}}"#, e)
+                    }
+                }
+            }
             "process.spawn" => {
                 if permissions.process.is_empty() {
                     return r#"{"status": "error", "message": "Permission denied: process access not granted"}"#.to_string();
@@ -57,10 +113,16 @@ pub fn handle_invoke(
                 let id = req["args"]["id"].as_str().unwrap_or("unknown").to_string();
                 let command = req["args"]["command"].as_str().unwrap_or("").to_string();
                 let args: Vec<String> = req["args"]["args"].as_array().unwrap_or(&vec![]).iter().map(|v| v.as_str().unwrap_or("").to_string()).collect();
+                let cwd = req["args"]["cwd"].as_str().map(|s| s.to_string());
                 
                 let tx = action_tx.clone();
                 std::thread::spawn(move || {
-                    let output = std::process::Command::new(command).args(args).output();
+                    let mut cmd = std::process::Command::new(command);
+                    cmd.args(args);
+                    if let Some(dir) = cwd {
+                        cmd.current_dir(dir);
+                    }
+                    let output = cmd.output();
                     if let Ok(output) = output {
                         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
                         let code = output.status.code().unwrap_or(0);
@@ -151,6 +213,16 @@ pub fn handle_invoke(
                 }
                 r#"{"status": "queued"}"#.to_string()
             }
+            "ui.update_sidebar" => {
+                let id = req["args"]["id"].as_str().unwrap_or("").to_string();
+                let title = req["args"]["title"].as_str().map(|s| s.to_string());
+                let ui_ast = req["args"]["ui"].clone();
+
+                if let Err(e) = action_tx.send(PluginAction::UpdateSidebarItem { plugin_id: plugin_id.to_string(), id, title, ui_ast }) {
+                    return format!(r#"{{"status": "error", "message": "Channel send failed: {}"}}"#, e);
+                }
+                r#"{"status": "queued"}"#.to_string()
+            }
             "ui.register_panel" => {
                 let id = req["args"]["id"].as_str().unwrap_or("").to_string();
                 let title = req["args"]["title"].as_str().unwrap_or("Panel").to_string();
@@ -167,5 +239,67 @@ pub fn handle_invoke(
         }
     } else {
         r#"{"status": "error", "message": "Invalid JSON"}"#.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{mpsc, Arc, RwLock};
+    use crate::settings::SettingsStore;
+    use crate::plugin_manager::manifest::PluginPermissions;
+
+    #[test]
+    fn test_api_router_ping() {
+        let (tx, _rx) = mpsc::sync_channel(10);
+        let settings = Arc::new(RwLock::new(SettingsStore::new()));
+        let permissions = PluginPermissions::default();
+
+        let res = handle_invoke(
+            "test_plugin",
+            r#"{"api": "system.ping"}"#,
+            &tx,
+            &settings,
+            &permissions,
+        );
+
+        assert_eq!(res, r#"{"status": "ok", "result": "pong"}"#);
+    }
+
+    #[test]
+    fn test_api_router_settings() {
+        let (tx, rx) = mpsc::sync_channel(10);
+        let settings = Arc::new(RwLock::new(SettingsStore::new()));
+        let permissions = PluginPermissions::default();
+
+        // set
+        let res_set = handle_invoke(
+            "test_plugin",
+            r#"{"api": "settings.set", "args": {"key": "test_key", "value": "test_val"}}"#,
+            &tx,
+            &settings,
+            &permissions,
+        );
+        assert_eq!(res_set, r#"{"status": "queued"}"#);
+
+        // receive action
+        let action = rx.try_recv().unwrap();
+        if let PluginAction::UpdateSetting { key, value } = action {
+            assert_eq!(key, "test_key");
+            assert_eq!(value, serde_json::json!("test_val"));
+            settings.write().unwrap().set(&key, value);
+        } else {
+            panic!("Expected UpdateSetting action");
+        }
+
+        // get
+        let res_get = handle_invoke(
+            "test_plugin",
+            r#"{"api": "settings.get", "args": {"key": "test_key"}}"#,
+            &tx,
+            &settings,
+            &permissions,
+        );
+        assert_eq!(res_get, r#"{"status": "ok", "value": "test_val"}"#);
     }
 }

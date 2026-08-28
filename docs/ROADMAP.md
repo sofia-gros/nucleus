@@ -11,7 +11,7 @@ Nucleus は、Rust (edition 2024)、GPUI、Wasmtime をベースにした、超�
 - **Phase 2: Project & File System**: 🟡 **40% 完了**
 - **Phase 3: LSP & Language Intelligence**: ⚪ **0% 未着手**
 - **Phase 4: Terminal & Process**: 🟡 **30% 完了**
-- **Phase 5: Plugin System (WASM)**: 🟡 **65% 完了**
+- **Phase 5: Plugin System (WASM)**: 🟢 **95% 完了**
 - **Phase 6: Polish & Performance Tuning**: 🟡 **20% 完了**
 
 ---
@@ -41,9 +41,10 @@ Nucleus は、Rust (edition 2024)、GPUI、Wasmtime をベースにした、超�
   - [x] `SyntectHighlighter` による構文ハイライト
   - [x] コード折りたたみ (`folding(true)`)
   - [x] `TextBuffer` との双方向テキスト同期 & ファイル保存
-- [x] **タブ管理 & エディタ領域 (`src/workspace/editor_area/`)**
+- [x] **タブ管理 & カスタムタブバー (`src/workspace/editor_area/`)**
+  - [x] カスタムファイルタブUI (ファイルアイコン、タイトル、ダーティインジケータ `●`、個別閉じるボタン `✕`)
   - [x] 複数タブの開閉・切り替え
-  - [x] 未保存変更のダーティインジケータ (`●`) 表示
+  - [x] 右クリックコンテキストメニュー (VSCode 互換: Close, Close Others, Close to the Right, Close Saved, Close All)
   - [x] `Ctrl+S` 等によるバッファ保存
 
 ---
@@ -56,7 +57,8 @@ Nucleus は、Rust (edition 2024)、GPUI、Wasmtime をベースにした、超�
 - [x] **ファイルツリー探索 (`src/file_system/mod.rs`, `src/workspace/left_sidebar/`)**
   - [x] ディレクトリの再帰走査とソート（フォルダ優先）
   - [x] `gpui-component` の `Tree` を用いたツリーUI表示
-  - [x] Git ステータスバッジの表示 (M, U, D)
+  - [x] VSCode 準拠 Git ステータス表示（フォルダ右端の丸バッジ `●`、ファイル右端のステータス文字 `M`, `U`, `D`）
+  - [x] Source Control UI (Staged / Changes 分離、ホバー時の `+` ステージング / `↺` 破棄アクション)
 - [ ] **Worktree & ファイル監視 (`notify` crate 連携)**
   - [ ] 外部変更のリアルタイム検知
   - [ ] エディタ外で変更されたファイルの自動再読み込み / 警告ダイアログ
@@ -107,16 +109,23 @@ Nucleus は、Rust (edition 2024)、GPUI、Wasmtime をベースにした、超�
 - [x] **Plugin ABI & Host API ルーター (`src/plugin_manager/api_router.rs`)**
   - [x] `host_invoke` (ポインタ渡し + JSONシリアライズ)
   - [x] イベントディスパッチ (`on_event`)
+  - [x] プロセス実行 API (`process.exec`, `process.spawn`)
+  - [x] ワークスペース API (`workspace.get_root_path`, `workspace.open_tab`, `workspace.show_notification`)
   - [x] ファイル読み書き API (`fs.read_file`, `fs.write_file`)
-  - [x] プロセス起動 API (`process.spawn`)
   - [x] 設定取得・更新 API (`settings.get`, `settings.set`)
+  - [x] コマンド登録 API (`command.register`)
 - [x] **UI Extension Points (`src/plugin_manager/ui.rs`)**
   - [x] Activity Bar アイテム登録
-  - [x] Status Bar アイテム登録
-  - [x] Sidebar / Panel アイテム登録 (JSON UI AST による宣言的レンダリング)
+  - [x] Status Bar アイテム登録 (ブランチ名表示等)
+  - [x] Sidebar / Panel アイテム登録 & 動的更新 (`ui.update_sidebar`)
+  - [x] 宣言的 UI AST レンダリング (`source_control`, `tree`, `text`)
+- [x] **公式組み込み Git プラグイン (`plugins/git/`)**
+  - [x] `git status` / `git branch` の同期・非同期取得
+  - [x] Source Control サイドバー (変更ファイル一覧, コミット入力フォーム)
+  - [x] ファイルツリーへの Git ステータスバッジ反映 (`M`, `??`, `A`, `D`)
+  - [x] 変更ファイルクリック時のエディタタブ表示 & コミット実行
 - [ ] **Plugin SDK & 権限システムの厳格化**
   - [ ] `nucleus-plugin-sdk` クレートの提供
-  - [ ] Manifest 宣言に基づくファイル/ネットワーク/プロセスの権限チェック
 
 ---
 

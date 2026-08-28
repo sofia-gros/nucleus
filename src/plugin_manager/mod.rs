@@ -41,18 +41,40 @@ impl PluginManager {
 
     pub fn discover_and_load(&mut self, plugins_dir: &Path) -> Result<()> {
         if !plugins_dir.exists() {
-            return Ok(()); // directory doesn't exist yet, which is fine
+            return Ok(());
         }
 
+        self.ui_registry.register_status_bar_item(ui::StatusBarItem {
+            id: "plugin_loader".to_string(),
+            plugin_id: "core".to_string(),
+            text: "⟳ Loading plugins...".to_string(),
+            icon: None,
+            command: None,
+            alignment: ui::StatusBarAlignment::Right,
+        });
+
+        let mut loaded_count = 0;
         for entry in std::fs::read_dir(plugins_dir)? {
             let entry = entry?;
             let path = entry.path();
             if path.is_dir() {
                 if let Err(e) = self.try_load_plugin_dir(&path) {
                     eprintln!("Failed to load plugin from {}: {}", path.display(), e);
+                } else {
+                    loaded_count += 1;
                 }
             }
         }
+
+        self.ui_registry.register_status_bar_item(ui::StatusBarItem {
+            id: "plugin_loader".to_string(),
+            plugin_id: "core".to_string(),
+            text: format!("✓ Plugins ready ({} plugins)", loaded_count),
+            icon: None,
+            command: None,
+            alignment: ui::StatusBarAlignment::Right,
+        });
+
         Ok(())
     }
 
@@ -64,6 +86,15 @@ impl PluginManager {
 
         let content = std::fs::read_to_string(&manifest_path)?;
         let manifest = manifest::PluginManifest::parse(&content)?;
+
+        self.ui_registry.register_status_bar_item(ui::StatusBarItem {
+            id: "plugin_loader".to_string(),
+            plugin_id: "core".to_string(),
+            text: format!("⟳ Loading: {}...", manifest.plugin.name),
+            icon: None,
+            command: None,
+            alignment: ui::StatusBarAlignment::Right,
+        });
 
         if let Some(wasm_file) = &manifest.runtime.wasm {
             let wasm_path = dir.join(wasm_file);

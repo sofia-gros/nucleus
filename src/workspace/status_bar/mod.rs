@@ -1,3 +1,5 @@
+/// 最下部ステータスバーの描画コンポーネント (VSCode 精密再現版)
+
 use gpui::*;
 use gpui_component::theme::ActiveTheme;
 
@@ -20,10 +22,12 @@ impl Render for StatusBar {
             
             for item in &pm.ui_registry.status_bar_items {
                 let text = item.text.clone();
-                // We could use icon rendering here if specified, for now fallback to text
                 let mut el = div()
-                    .px_3()
-                    .py_1()
+                    .px_2()
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .hover(|s| s.bg(cx.theme().muted).text_color(cx.theme().foreground))
                     .cursor_pointer()
@@ -49,56 +53,50 @@ impl Render for StatusBar {
 
         div()
             .w_full()
-            .h(gpui::px(24.0))
+            .h(gpui::px(22.0))
             .bg(cx.theme().background)
             .border_t_1()
             .border_color(cx.theme().border)
             .flex()
             .items_center()
             .justify_between()
-            .text_sm()
+            .text_xs()
             .child(
                 div().flex().items_center().h_full()
-                    // Default Left Items (Branch, Sync, Problems)
-                    .child(
-                        div().px_3().h_full().flex().items_center().text_color(cx.theme().muted_foreground)
-                            .hover(|s| s.bg(cx.theme().muted).text_color(cx.theme().foreground)).cursor_pointer()
-                            .child("master") // TODO: Dynamic branch from settings
-                    )
-                    .child(
-                        div().px_3().h_full().flex().items_center().text_color(cx.theme().muted_foreground)
-                            .hover(|s| s.bg(cx.theme().muted).text_color(cx.theme().foreground)).cursor_pointer()
-                            .child("× 0 ⚠ 0") // Mock problems
-                    )
                     .children(left_items)
+                    .child(
+                        div().px_2().h_full().flex().items_center().gap_1().text_color(cx.theme().muted_foreground)
+                            .hover(|s| s.bg(cx.theme().muted).text_color(cx.theme().foreground)).cursor_pointer()
+                            .child("⨂ 0  ⚠ 0")
+                    )
             )
             .child(
                 div().flex().items_center().h_full()
                     .children(right_items)
                     .child(
-                        div().px_3().h_full().flex().items_center().text_color(cx.theme().muted_foreground)
+                        div().px_2().h_full().flex().items_center().text_color(cx.theme().muted_foreground)
                             .hover(|s| s.bg(cx.theme().muted).text_color(cx.theme().foreground)).cursor_pointer()
-                            .child("Ln 3, Col 1")
+                            .child("Ln 1, Col 1")
                     )
                     .child(
-                        div().px_3().h_full().flex().items_center().text_color(cx.theme().muted_foreground)
+                        div().px_2().h_full().flex().items_center().text_color(cx.theme().muted_foreground)
                             .hover(|s| s.bg(cx.theme().muted).text_color(cx.theme().foreground)).cursor_pointer()
                             .child("Spaces: 4")
                     )
                     .child(
-                        div().px_3().h_full().flex().items_center().text_color(cx.theme().muted_foreground)
+                        div().px_2().h_full().flex().items_center().text_color(cx.theme().muted_foreground)
                             .hover(|s| s.bg(cx.theme().muted).text_color(cx.theme().foreground)).cursor_pointer()
                             .child("UTF-8")
                     )
                     .child(
-                        div().px_3().h_full().flex().items_center().text_color(cx.theme().muted_foreground)
+                        div().px_2().h_full().flex().items_center().text_color(cx.theme().muted_foreground)
                             .hover(|s| s.bg(cx.theme().muted).text_color(cx.theme().foreground)).cursor_pointer()
-                            .child("CRLF")
+                            .child("LF")
                     )
                     .child(
-                        div().px_3().h_full().flex().items_center().text_color(cx.theme().muted_foreground)
+                        div().px_2().h_full().flex().items_center().text_color(cx.theme().muted_foreground)
                             .hover(|s| s.bg(cx.theme().muted).text_color(cx.theme().foreground)).cursor_pointer()
-                            .child("{} Markdown")
+                            .child("{} JSON")
                     )
             )
     }

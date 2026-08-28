@@ -210,6 +210,14 @@ fn spawn_plugin_event_loop(
                             });
                         });
                     }
+                    plugin_manager::action::PluginAction::UpdateSidebarItem { plugin_id, id, title, ui_ast } => {
+                        let _ = app_cx.update(|cx| {
+                            pm_model.update(cx, |pm, cx| {
+                                pm.ui_registry.update_sidebar_item(&plugin_id, &id, title, ui_ast);
+                                cx.notify();
+                            });
+                        });
+                    }
                     plugin_manager::action::PluginAction::RegisterPanelItem { plugin_id, id, title, ui_ast } => {
                         let _ = app_cx.update(|cx| {
                             pm_model.update(cx, |pm, cx| {

@@ -4,12 +4,11 @@ use gpui_component::{Icon, IconName};
 
 pub struct TitleBar {
     active_menu: Option<&'static str>,
-    should_move: bool,
 }
 
 impl TitleBar {
     pub fn new() -> Self {
-        Self { active_menu: None, should_move: false }
+        Self { active_menu: None }
     }
 }
 
@@ -25,17 +24,8 @@ impl Render for TitleBar {
             .flex()
             .items_center()
             .justify_between()
-            .on_mouse_down(MouseButton::Left, cx.listener(|this, _event: &MouseDownEvent, _window, _cx| {
-                this.should_move = true;
-            }))
-            .on_mouse_up(MouseButton::Left, cx.listener(|this, _event: &MouseUpEvent, _window, _cx| {
-                this.should_move = false;
-            }))
-            .on_mouse_move(cx.listener(|this, _event: &MouseMoveEvent, window, _cx| {
-                if this.should_move {
-                    this.should_move = false;
-                    window.start_window_move();
-                }
+            .on_mouse_down(MouseButton::Left, cx.listener(|_this, _event: &MouseDownEvent, window, _cx| {
+                window.start_window_move();
             }))
             .child(
                 // Left side: Logo and Menus
