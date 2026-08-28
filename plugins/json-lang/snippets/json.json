@@ -1,0 +1,22 @@
+{
+  "Empty Object": {
+    "prefix": "obj",
+    "body": [
+      "{",
+      "  \"${1:key}\": \"${2:value}\"",
+      "}"
+    ],
+    "description": "Empty JSON object"
+  },
+  "Package JSON snippet": {
+    "prefix": "pkg",
+    "body": [
+      "{",
+      "  \"name\": \"${1:package-name}\",",
+      "  \"version\": \"1.0.0\",",
+      "  \"main\": \"index.js\"",
+      "}"
+    ],
+    "description": "Package JSON base"
+  }
+}

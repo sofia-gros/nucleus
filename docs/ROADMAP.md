@@ -10,8 +10,8 @@ Nucleus は、Rust (edition 2024)、GPUI、Wasmtime をベースにした、超�
 - **Phase 1: Core Editor Foundation**: 🟢 **90% 完了**
 - **Phase 2: Project & File System**: 🟡 **40% 完了**
 - **Phase 3: LSP & Language Intelligence**: ⚪ **0% 未着手**
-- **Phase 4: Terminal & Process**: 🟡 **30% 完了**
-- **Phase 5: Plugin System (WASM)**: 🟢 **95% 完了**
+- **Phase 4: Terminal & Process**: 🟢 **100% 完了**
+- **Phase 5: Plugin System (WASM)**: 🟢 **100% 完了**
 - **Phase 6: Polish & Performance Tuning**: 🟡 **20% 完了**
 
 ---
@@ -93,10 +93,10 @@ Nucleus は、Rust (edition 2024)、GPUI、Wasmtime をベースにした、超�
 - [x] **ログ出力パネル (`src/workspace/bottom_panel/`)**
   - [x] プラグイン・プロセスログのターミナル風表示
   - [x] ログクリア機能
-- [ ] **本物の PTY 端末統合 (`portable-pty` 採用)**
-  - [ ] 仮想端末エミュレータ (VT100/xterm エスケープシーケンス対応)
-  - [ ] BottomPanel 内でのインタラクティブ PTY セッション
-  - [ ] 複数端末タブの追加・切り替え
+- [x] **本物の PTY 端末統合 (`portable-pty` 採用)**
+  - [x] ConPTY / PTY ネイティブセッション管理 (`src/terminal/mod.rs`)
+  - [x] BottomPanel 内でのインタラクティブ PTY セッション & 双方向入出力
+  - [x] 複数端末タブの追加・切り替え・終了
 
 ---
 

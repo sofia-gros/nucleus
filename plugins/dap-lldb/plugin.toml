@@ -1,0 +1,12 @@
+[plugin]
+id = "nucleus.dap-lldb"
+name = "LLDB Debug Adapter"
+version = "0.1.0"
+api_version = "1"
+description = "Native C/C++/Rust debugging adapter via LLDB"
+author = "Nucleus Core Team"
+
+[debug_adapter]
+type = "lldb"
+program = "lldb-dap"
+languages = ["c", "cpp", "rust"]

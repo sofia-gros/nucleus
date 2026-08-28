@@ -1,0 +1,11 @@
+[plugin]
+id = "nucleus.theme-onedark"
+name = "One Dark Theme"
+version = "0.1.0"
+api_version = "1"
+description = "Iconic One Dark color theme for Nucleus"
+author = "Nucleus Core Team"
+
+[theme]
+path = "theme.json"
+type = "dark"

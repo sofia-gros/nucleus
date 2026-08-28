@@ -1,0 +1,10 @@
+[plugin]
+id = "nucleus.language-rust"
+name = "Rust Language Support"
+version = "0.1.0"
+api_version = "1"
+description = "Provides syntax highlighting and snippets for Rust"
+author = "Nucleus Core Team"
+
+[languages]
+rust = { extensions = ["rs"], snippets = "snippets/rust.json" }

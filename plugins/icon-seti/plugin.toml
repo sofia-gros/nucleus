@@ -1,0 +1,10 @@
+[plugin]
+id = "nucleus.icon-seti"
+name = "Seti Icon Theme"
+version = "0.1.0"
+api_version = "1"
+description = "Seti-style file icons and colors"
+author = "Nucleus Core Team"
+
+[icon_theme]
+path = "icons.json"

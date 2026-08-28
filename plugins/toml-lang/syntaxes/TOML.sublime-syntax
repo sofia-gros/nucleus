@@ -1,0 +1,105 @@
+%YAML 1.2
+---
+name: TOML
+scope: source.toml
+version: 2
+
+file_extensions:
+  - toml
+  - tml
+  - Pipfile
+  - Cargo.lock
+  - Gopkg.lock
+  - mise.lock
+  - pdm.lock
+  - poetry.lock
+  - uv.lock
+  - lock
+
+contexts:
+  main:
+    - meta_include_prototype: false
+    - match: ''
+      set: toml
+
+  toml:
+    - meta_content_scope: meta.mapping.toml
+    - include: comments
+    - include: table-header
+    - include: table-keys
+    - include: table-values
+    - include: illegal-tokens
+
+  comments:
+    - match: \#
+      scope: punctuation.definition.comment.toml
+      push: comment-body
+
+  comment-body:
+    - meta_scope: comment.line.number-sign.toml
+    - match: $\n?
+      pop: 1
+
+  table-header:
+    - match: '\[\['
+      scope: punctuation.section.brackets.begin.toml
+      set: table-header-body
+    - match: '\['
+      scope: punctuation.section.brackets.begin.toml
+      set: table-header-body
+
+  table-header-body:
+    - match: '\]\]'
+      scope: punctuation.section.brackets.end.toml
+      pop: 1
+    - match: '\]'
+      scope: punctuation.section.brackets.end.toml
+      pop: 1
+    - match: '[A-Za-z0-9_\-\.]+'
+      scope: entity.name.section.toml
+
+  table-keys:
+    - match: '([A-Za-z0-9_\-]+)\s*(=)'
+      captures:
+        1: meta.mapping.key.toml
+        2: punctuation.separator.key-value.toml
+      push: table-values
+
+  table-values:
+    - match: '"([^"\\]|\\.)*"'
+      scope: string.quoted.double.toml
+      pop: 1
+    - match: "'([^'\\\\]|\\\\.)*'"
+      scope: string.quoted.single.toml
+      pop: 1
+    - match: '\b(true|false)\b'
+      scope: constant.language.boolean.toml
+      pop: 1
+    - match: '\b[0-9]+(\.[0-9]+)?\b'
+      scope: constant.numeric.toml
+      pop: 1
+    - match: '\['
+      scope: punctuation.section.sequence.begin.toml
+      push: array-body
+    - match: '\{'
+      scope: punctuation.section.mapping.begin.toml
+      push: inline-table-body
+    - match: $\n?
+      pop: 1
+
+  array-body:
+    - match: '\]'
+      scope: punctuation.section.sequence.end.toml
+      pop: 1
+    - include: table-values
+
+  inline-table-body:
+    - match: '\}'
+      scope: punctuation.section.mapping.end.toml
+      pop: 1
+    - include: table-keys
+    - include: table-values
+
+  illegal-tokens:
+    - match: '[^#\s]+'
+      scope: invalid.illegal.toml

@@ -1,0 +1,10 @@
+[plugin]
+id = "nucleus.language-toml"
+name = "TOML Language Support"
+version = "0.1.0"
+api_version = "1"
+description = "Provides syntax highlighting and snippets for TOML"
+author = "Nucleus Core Team"
+
+[languages]
+toml = { extensions = ["toml", "tml", "lock", "Cargo.lock", "Pipfile"], snippets = "snippets/toml.json" }

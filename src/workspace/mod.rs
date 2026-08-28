@@ -65,7 +65,7 @@ impl Workspace {
             activity_bar: cx.new(|_| ActivityBar::new()),
             left_sidebar: left_sidebar_entity,
             right_sidebar: cx.new(|_| RightSidebar::new()),
-            bottom_panel: cx.new(|_| BottomPanel::new()),
+            bottom_panel: cx.new(|cx| BottomPanel::new(cx)),
             editor_area: cx.new(|_| EditorArea::new()),
             root_path,
             state,

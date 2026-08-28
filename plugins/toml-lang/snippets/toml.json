@@ -1,0 +1,20 @@
+{
+  "Cargo Package": {
+    "prefix": "pkg",
+    "body": [
+      "[package]",
+      "name = \"${1:crate_name}\"",
+      "version = \"0.1.0\"",
+      "edition = \"2024\""
+    ],
+    "description": "Cargo package table"
+  },
+  "Dependencies": {
+    "prefix": "deps",
+    "body": [
+      "[dependencies]",
+      "${1:serde} = { version = \"1.0\", features = [\"derive\"] }"
+    ],
+    "description": "Cargo dependencies table"
+  }
+}

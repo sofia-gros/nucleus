@@ -1,0 +1,36 @@
+{
+  "Function": {
+    "prefix": "fn",
+    "body": [
+      "fn ${1:name}(${2:params}) -> ${3:Result<()>} {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "Function definition"
+  },
+  "Struct": {
+    "prefix": "struct",
+    "body": [
+      "#[derive(Debug, Clone)]",
+      "pub struct ${1:Name} {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "Struct definition"
+  },
+  "Test Module": {
+    "prefix": "modtest",
+    "body": [
+      "#[cfg(test)]",
+      "mod tests {",
+      "    use super::*;",
+      "",
+      "    #[test]",
+      "    fn test_${1:feature}() {",
+      "        ${0}",
+      "    }",
+      "}"
+    ],
+    "description": "Test module template"
+  }
+}

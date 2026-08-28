@@ -1,0 +1,12 @@
+{
+  "name": "Seti Icons",
+  "associations": {
+    "rs": { "icon": "file-code", "color": "#dea584" },
+    "toml": { "icon": "settings", "color": "#9c4221" },
+    "json": { "icon": "file-json", "color": "#cbcb41" },
+    "md": { "icon": "file-text", "color": "#519aba" },
+    "lock": { "icon": "lock", "color": "#e06c75" },
+    "js": { "icon": "file-code", "color": "#cbcb41" },
+    "ts": { "icon": "file-code", "color": "#519aba" }
+  }
+}

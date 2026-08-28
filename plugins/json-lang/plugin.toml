@@ -1,0 +1,10 @@
+[plugin]
+id = "nucleus.language-json"
+name = "JSON Language Support"
+version = "0.1.0"
+api_version = "1"
+description = "Provides syntax highlighting and snippets for JSON"
+author = "Nucleus Core Team"
+
+[languages]
+json = { extensions = ["json", "jsonc"], snippets = "snippets/json.json" }

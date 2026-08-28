@@ -1,0 +1,17 @@
+[plugin]
+id = "nucleus.lsp-rust-analyzer"
+name = "Rust Analyzer Language Server"
+version = "0.1.0"
+api_version = "1"
+description = "Official Rust Language Server Protocol (LSP) integration"
+author = "Nucleus Core Team"
+
+[runtime]
+wasm = "rust_analyzer.wasm"
+
+[lsp]
+languages = ["rust"]
+server_command = "rust-analyzer"
+
+[permissions]
+process = ["spawn"]
