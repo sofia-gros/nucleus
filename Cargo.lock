@@ -2629,7 +2629,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "raw-window-handle",
  "regex",
- "ropey",
+ "ropey 2.0.0-beta.1",
  "schemars",
  "serde",
  "serde_json",
@@ -2673,7 +2673,7 @@ dependencies = [
  "paste",
  "raw-window-handle",
  "resvg 0.45.1",
- "ropey",
+ "ropey 2.0.0-beta.1",
  "rust-i18n",
  "schemars",
  "serde",
@@ -4346,6 +4346,7 @@ dependencies = [
  "gpui-component",
  "gpui-component-assets",
  "gpui_platform",
+ "ropey 1.6.1",
  "serde",
  "serde_json",
  "syntect",
@@ -5893,6 +5894,16 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "ropey"
+version = "1.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93411e420bcd1a75ddd1dc3caf18c23155eda2c090631a85af21ba19e97093b5"
+dependencies = [
+ "smallvec",
+ "str_indices",
 ]
 
 [[package]]

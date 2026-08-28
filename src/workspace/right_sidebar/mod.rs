@@ -1,5 +1,4 @@
 use gpui::*;
-use crate::plugin_manager::{PluginManagerGlobal, ui::PanelItem};
 use gpui_component::theme::ActiveTheme;
 
 pub struct RightSidebar;

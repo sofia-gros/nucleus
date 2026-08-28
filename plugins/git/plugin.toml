@@ -1,0 +1,8 @@
+[plugin]
+id = "nucleus_git"
+name = "Git Extension"
+version = "0.1.0"
+api_version = "1"
+
+[permissions]
+process = ["git"]

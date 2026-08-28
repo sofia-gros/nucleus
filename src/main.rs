@@ -12,6 +12,14 @@ pub mod plugin_manager;
 pub mod workspace;
 pub mod settings;
 pub mod file_system;
+pub mod project;
+pub mod lsp;
+pub mod terminal;
+pub mod process;
+pub mod keybindings;
+pub mod theme;
+pub mod search;
+pub mod util;
 
 use settings::{SettingsStore, SettingsGlobal};
 use std::sync::{Arc, RwLock};
@@ -47,11 +55,7 @@ fn main() {
         };
         Theme::change(mode, None, cx);
 
-        cx.bind_keys([
-            KeyBinding::new("ctrl-b", workspace::ToggleLeftSidebar, None),
-            KeyBinding::new("ctrl-j", workspace::ToggleBottomPanel, None),
-            KeyBinding::new("ctrl-r", workspace::ToggleRightSidebar, None),
-        ]);
+        keybindings::init_keybindings(cx);
 
         let window_cx = cx.to_async();
         cx.spawn(|_cx: &mut gpui::AsyncApp| async move {

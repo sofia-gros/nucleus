@@ -4,6 +4,7 @@ pub mod api_router;
 pub mod action;
 pub mod event;
 pub mod ui;
+pub mod permissions;
 
 use anyhow::Result;
 use std::path::Path;

@@ -9,6 +9,7 @@ pub mod right_sidebar;
 pub mod bottom_panel;
 pub mod editor_area;
 pub mod state;
+pub mod command_palette;
 
 use std::path::PathBuf;
 use crate::plugin_manager::{action::PluginAction, event::PluginEvent, PluginManagerGlobal};
@@ -134,7 +135,11 @@ impl Workspace {
                 println!("UI Notification: {}", message);
             }
             PluginAction::OpenPanel { id } => {
-                println!("UI Action: OpenPanel {}", id);
+                self.left_sidebar.update(cx, |sidebar, cx| {
+                    sidebar.set_active_panel(id.clone(), cx);
+                });
+                self.state.left_sidebar_open = true;
+                cx.notify();
             }
             PluginAction::UpdateSetting { key, value } => {
                 if cx.has_global::<crate::settings::SettingsGlobal>() {

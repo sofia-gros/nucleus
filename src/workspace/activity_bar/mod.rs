@@ -58,9 +58,27 @@ impl Render for ActivityBar {
             }
         }
 
-        if items.is_empty() {
-            items.push(div().py_2().text_sm().text_color(cx.theme().muted_foreground).child("AB"));
-        }
+        let is_explorer_active = true; // TODO: read from state
+        let explorer_icon = div()
+            .w_full()
+            .flex()
+            .justify_center()
+            .py_2()
+            .text_sm()
+            .text_color(if is_explorer_active { cx.theme().foreground } else { cx.theme().muted_foreground })
+            .hover(|s| s.bg(cx.theme().muted).text_color(cx.theme().foreground))
+            .cursor_pointer()
+            .child(Icon::new(IconName::File))
+            .on_mouse_down(MouseButton::Left, cx.listener(|_bar, _event, _window, cx| {
+                if cx.has_global::<crate::plugin_manager::PluginManagerGlobal>() {
+                    let pm_global = cx.global::<crate::plugin_manager::PluginManagerGlobal>().0.clone();
+                    pm_global.update(cx, |pm, _| {
+                        // Dispatch an action that main.rs / workspace will catch to open explorer
+                        pm.dispatch_action(crate::plugin_manager::action::PluginAction::OpenPanel { id: "explorer".to_string() });
+                    });
+                }
+            }));
+        items.insert(0, explorer_icon);
 
         div()
             .flex()

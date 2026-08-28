@@ -5,7 +5,7 @@ use gpui_component::input::{
     EditorState, FoldRange, HighlightStyleResolver, InputEdit, InputHighlighter, Rope,
 };
 use syntect::{
-    parsing::{ParseState, Scope, ScopeStack, SyntaxReference, SyntaxSet},
+    parsing::{ParseState, Scope, ScopeStack, SyntaxSet},
     util::LinesWithEndings,
 };
 

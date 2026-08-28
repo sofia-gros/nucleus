@@ -51,18 +51,55 @@ impl Render for StatusBar {
             .w_full()
             .h(gpui::px(24.0))
             .bg(cx.theme().background)
+            .border_t_1()
+            .border_color(cx.theme().border)
             .flex()
             .items_center()
             .justify_between()
+            .text_sm()
             .child(
-                div().flex().items_center().children(left_items)
+                div().flex().items_center().h_full()
+                    // Default Left Items (Branch, Sync, Problems)
+                    .child(
+                        div().px_3().h_full().flex().items_center().text_color(cx.theme().muted_foreground)
+                            .hover(|s| s.bg(cx.theme().muted).text_color(cx.theme().foreground)).cursor_pointer()
+                            .child("master") // TODO: Dynamic branch from settings
+                    )
+                    .child(
+                        div().px_3().h_full().flex().items_center().text_color(cx.theme().muted_foreground)
+                            .hover(|s| s.bg(cx.theme().muted).text_color(cx.theme().foreground)).cursor_pointer()
+                            .child("× 0 ⚠ 0") // Mock problems
+                    )
+                    .children(left_items)
             )
             .child(
-                div().flex().items_center()
+                div().flex().items_center().h_full()
                     .children(right_items)
-                    .child(div().px_3().text_color(cx.theme().muted_foreground).child("Ln 1, Col 1"))
-                    .child(div().px_3().text_color(cx.theme().muted_foreground).child("UTF-8"))
-                    .child(div().px_3().text_color(cx.theme().muted_foreground).child("Rust"))
+                    .child(
+                        div().px_3().h_full().flex().items_center().text_color(cx.theme().muted_foreground)
+                            .hover(|s| s.bg(cx.theme().muted).text_color(cx.theme().foreground)).cursor_pointer()
+                            .child("Ln 3, Col 1")
+                    )
+                    .child(
+                        div().px_3().h_full().flex().items_center().text_color(cx.theme().muted_foreground)
+                            .hover(|s| s.bg(cx.theme().muted).text_color(cx.theme().foreground)).cursor_pointer()
+                            .child("Spaces: 4")
+                    )
+                    .child(
+                        div().px_3().h_full().flex().items_center().text_color(cx.theme().muted_foreground)
+                            .hover(|s| s.bg(cx.theme().muted).text_color(cx.theme().foreground)).cursor_pointer()
+                            .child("UTF-8")
+                    )
+                    .child(
+                        div().px_3().h_full().flex().items_center().text_color(cx.theme().muted_foreground)
+                            .hover(|s| s.bg(cx.theme().muted).text_color(cx.theme().foreground)).cursor_pointer()
+                            .child("CRLF")
+                    )
+                    .child(
+                        div().px_3().h_full().flex().items_center().text_color(cx.theme().muted_foreground)
+                            .hover(|s| s.bg(cx.theme().muted).text_color(cx.theme().foreground)).cursor_pointer()
+                            .child("{} Markdown")
+                    )
             )
     }
 }

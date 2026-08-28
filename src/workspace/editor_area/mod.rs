@@ -1,27 +1,47 @@
-use gpui::*;
-use gpui_component::*;
-use gpui_component::input::{Editor, EditorState};
-use gpui_component::tab::TabBar;
-use gpui_component::theme::ActiveTheme;
+/// エディタ領域およびタブ管理コンポーネント
+
 pub mod highlighter;
 
+use std::path::PathBuf;
+use gpui::*;
+use gpui_component::tab::TabBar;
+use gpui_component::theme::ActiveTheme;
+use crate::editor::Editor;
+
+/// 単一のエディタタブ情報
+pub struct EditorTab {
+    /// ファイルパス
+    pub path: String,
+    /// タブの表示タイトル
+    pub title: String,
+    /// エディタエンティティ（初期化前は None）
+    pub editor: Option<Entity<Editor>>,
+}
+
+/// エディタ領域全体の管理構造体
 pub struct EditorArea {
-    pub tabs: Vec<(String, String, Option<Entity<EditorState>>)>, // path, title, state
+    /// 開かれているタブのリスト
+    pub tabs: Vec<EditorTab>,
+    /// 初期化待ちのタブコンテンツ (path -> content)
     pub pending_contents: std::collections::HashMap<String, String>,
+    /// アクティブなタブのインデックス
     pub active_tab: usize,
+    /// 閉じる予約が入ったタブのインデックス
     pub pending_close_tab: Option<usize>,
 }
 
 impl EditorArea {
+    /// 新しい EditorArea を作成
     pub fn new() -> Self {
         Self {
-            tabs: vec![],
+            tabs: Vec::new(),
             pending_contents: std::collections::HashMap::new(),
             active_tab: 0,
             pending_close_tab: None,
         }
     }
 
+    /// タブを閉じる
     pub fn close_tab(&mut self, idx: usize, cx: &mut Context<Self>) {
         if idx < self.tabs.len() {
             self.tabs.remove(idx);
@@ -32,23 +52,69 @@ impl EditorArea {
         cx.notify();
     }
 
+    /// ファイルまたは新規バッファをタブとして開く
     pub fn open_tab(&mut self, path: String, title: String, content: String, cx: &mut Context<Self>) {
-        if let Some(idx) = self.tabs.iter().position(|(p, _, _)| p == &path) {
+        if let Some(idx) = self.tabs.iter().position(|t| t.path == path) {
             self.active_tab = idx;
             self.pending_contents.insert(path, content);
         } else {
             self.pending_contents.insert(path.clone(), content);
-            self.tabs.push((path, title, None));
+            self.tabs.push(EditorTab {
+                path,
+                title,
+                editor: None,
+            });
             self.active_tab = self.tabs.len() - 1;
         }
         cx.notify();
     }
+
+    /// ファイル拡張子から言語名を判定
+    fn detect_language(path: &str) -> &'static str {
+        let ext = std::path::Path::new(path)
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        match ext {
+            "rs" => "rust",
+            "js" | "jsx" => "javascript",
+            "ts" | "tsx" => "typescript",
+            "html" => "html",
+            "css" => "css",
+            "json" => "json",
+            "toml" => "toml",
+            "md" => "markdown",
+            "py" => "python",
+            "go" => "go",
+            "c" => "c",
+            "cpp" | "cc" | "cxx" => "cpp",
+            _ => "plaintext",
+        }
+    }
 }
 
 impl Render for EditorArea {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if let Some(idx) = self.pending_close_tab.take() {
             self.close_tab(idx, cx);
+        }
+
+        // 未初期化のタブを初期化
+        for tab in self.tabs.iter_mut() {
+            if tab.editor.is_none() {
+                if let Some(content) = self.pending_contents.remove(&tab.path) {
+                    let path_buf = if tab.path.is_empty() {
+                        None
+                    } else {
+                        Some(PathBuf::from(&tab.path))
+                    };
+                    let lang = Self::detect_language(&tab.path);
+                    let editor_entity = cx.new(|cx| {
+                        Editor::new(window, &content, path_buf, lang, cx)
+                    });
+                    tab.editor = Some(editor_entity);
+                }
+            }
         }
 
         if self.tabs.is_empty() {
@@ -75,12 +141,6 @@ impl Render for EditorArea {
                 .into_any_element();
         }
 
-        let active_tab_title = if self.active_tab < self.tabs.len() {
-            self.tabs[self.active_tab].1.clone()
-        } else {
-            String::new()
-        };
-
         let mut tab_bar = TabBar::new("editor-tabs")
             .w_full()
             .selected_index(self.active_tab)
@@ -89,62 +149,22 @@ impl Render for EditorArea {
                 cx.notify();
             }));
 
-        for (_idx, (_, title, _)) in self.tabs.iter().enumerate() {
-            tab_bar = tab_bar.child(title.clone());
-        }
+        for tab in &self.tabs {
+            let is_dirty = tab.editor.as_ref().map(|e| e.read(cx).is_dirty(cx)).unwrap_or(false);
+            let title_text = if is_dirty {
+                format!("● {}", tab.title)
+            } else {
+                tab.title.clone()
+            };
 
-        // Initialize pending tabs
-        for (_idx, (path, _title, state_opt)) in self.tabs.iter_mut().enumerate() {
-            if state_opt.is_none() {
-                if let Some(content) = self.pending_contents.remove(path) {
-                    let ext = std::path::Path::new(path)
-                        .extension()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("");
-                    let lang = match ext {
-                        "rs" => "rust",
-                        "js" | "jsx" => "javascript",
-                        "ts" | "tsx" => "typescript",
-                        "html" => "html",
-                        "css" => "css",
-                        "json" => "json",
-                        "toml" => "toml",
-                        "md" => "markdown",
-                        "py" => "python",
-                        "go" => "go",
-                        "c" => "c",
-                        "cpp" | "cc" | "cxx" => "cpp",
-                        _ => "plaintext",
-                    };
-                    
-                    let editor_state = cx.new(|cx| {
-                        let mut state = EditorState::new(_window, cx)
-                            .language(lang)
-                            .folding(true)
-                            .default_value(&content);
-                        // Install a factory that returns our highlighter
-                        state.set_highlighter_factory(std::rc::Rc::new(|lang: &str| {
-                            if let Some(h) = highlighter::SyntectHighlighter::new(lang) {
-                                Some(Box::new(h) as Box<dyn gpui_component::input::InputHighlighter>)
-                            } else {
-                                None
-                            }
-                        }), cx);
-                        let mut editor_style = gpui_base::input::InputEditorStyle::default();
-                        editor_style.highlight_styles = std::sync::Arc::new(highlighter::ShowcaseHighlightStyles::default());
-                        state.set_editor_style(editor_style);
-                        state
-                    });
-                    *state_opt = Some(editor_state);
-                }
-            }
+            tab_bar = tab_bar.child(title_text);
         }
 
         let active_editor = if self.active_tab < self.tabs.len() {
-            if let Some(state) = &self.tabs[self.active_tab].2 {
-                Editor::new(state).size_full().into_any_element()
+            if let Some(editor_entity) = &self.tabs[self.active_tab].editor {
+                editor_entity.clone().into_any_element()
             } else {
-                div().child("Loading...").into_any_element()
+                div().p_4().text_sm().text_color(cx.theme().muted_foreground).child("Loading...").into_any_element()
             }
         } else {
             div().into_any_element()
