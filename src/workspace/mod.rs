@@ -1,3 +1,5 @@
+/// ワークスペース統括コンポーネント (TitleBar, Sidebars, EditorArea, BottomPanel, CommandPalette, FileWatcher 統合)
+
 use gpui::*;
 use gpui_component::theme::ActiveTheme;
 
@@ -10,9 +12,11 @@ pub mod bottom_panel;
 pub mod editor_area;
 pub mod state;
 pub mod command_palette;
+pub mod recovery;
 
 use std::path::PathBuf;
-use crate::plugin_manager::{action::PluginAction, event::PluginEvent, PluginManagerGlobal};
+use crate::plugin_manager::action::PluginAction;
+use crate::file_system::watcher::{FileWatcher, FileWatchEvent};
 
 use title_bar::TitleBar;
 use status_bar::StatusBar;
@@ -21,12 +25,13 @@ use left_sidebar::LeftSidebar;
 use right_sidebar::RightSidebar;
 use bottom_panel::BottomPanel;
 use editor_area::EditorArea;
+use command_palette::CommandPalette;
 use state::WorkspaceState;
 use gpui::{MouseDownEvent, MouseMoveEvent, MouseUpEvent, MouseButton};
 
 actions!(
     workspace,
-    [ToggleLeftSidebar, ToggleRightSidebar, ToggleBottomPanel]
+    [ToggleLeftSidebar, ToggleRightSidebar, ToggleBottomPanel, OpenFileFinder, OpenCommandPalette]
 );
 
 pub struct Workspace {
@@ -38,6 +43,8 @@ pub struct Workspace {
     pub right_sidebar: Entity<RightSidebar>,
     pub bottom_panel: Entity<BottomPanel>,
     pub editor_area: Entity<EditorArea>,
+    pub command_palette: Entity<CommandPalette>,
+    pub file_watcher: Option<FileWatcher>,
     pub root_path: Option<PathBuf>,
     state: WorkspaceState,
     save_task: Option<Task<()>>,
@@ -57,6 +64,13 @@ impl Workspace {
                 sidebar.set_root(Some(p.clone()), cx);
             });
         }
+
+        // バックグラウンドファイルウォッチャーの起動
+        let watcher = if let Some(ref root) = root_path {
+            FileWatcher::watch(root).ok()
+        } else {
+            None
+        };
         
         Self {
             focus_handle: cx.focus_handle(),
@@ -67,6 +81,8 @@ impl Workspace {
             right_sidebar: cx.new(|_| RightSidebar::new()),
             bottom_panel: cx.new(|cx| BottomPanel::new(cx)),
             editor_area: cx.new(|_| EditorArea::new()),
+            command_palette: cx.new(|cx| CommandPalette::new(cx)),
+            file_watcher: watcher,
             root_path,
             state,
             save_task: None,
@@ -80,40 +96,47 @@ impl Workspace {
         let state_clone = self.state.clone();
         let executor = cx.background_executor().clone();
         self.save_task = Some(executor.clone().spawn(async move {
-            // Wait 500ms for debounce
             executor.timer(std::time::Duration::from_millis(500)).await;
-            
-            let path = Self::state_path();
-            if let Some(parent) = path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            if let Ok(json_str) = serde_json::to_string_pretty(&state_clone) {
-                let _ = std::fs::write(path, json_str);
-            }
+            Self::save_state_to_disk(&state_clone);
         }));
     }
 
-    fn state_path() -> std::path::PathBuf {
-        std::path::PathBuf::from(".nucleus").join("state.json")
-    }
-
     fn load_state() -> WorkspaceState {
-        let path = Self::state_path();
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            if let Ok(state) = serde_json::from_str(&content) {
+        if let Ok(data) = std::fs::read_to_string(".nucleus/state.json") {
+            if let Ok(state) = serde_json::from_str(&data) {
                 return state;
             }
         }
         WorkspaceState::default()
     }
 
-    pub fn save_state(&self) {
-        let path = Self::state_path();
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+    fn save_state_to_disk(state: &WorkspaceState) {
+        let _ = std::fs::create_dir_all(".nucleus");
+        if let Ok(data) = serde_json::to_string_pretty(state) {
+            let _ = std::fs::write(".nucleus/state.json", data);
         }
-        if let Ok(json_str) = serde_json::to_string_pretty(&self.state) {
-            let _ = std::fs::write(path, json_str);
+    }
+
+    pub fn poll_file_watcher(&mut self, cx: &mut Context<Self>) {
+        if let Some(ref watcher) = self.file_watcher {
+            let mut modified = false;
+            while let Ok(event) = watcher.event_rx.try_recv() {
+                match event {
+                    FileWatchEvent::Created(_) | FileWatchEvent::Removed(_) | FileWatchEvent::Modified(_) => {
+                        modified = true;
+                    }
+                    _ => {}
+                }
+            }
+            if modified {
+                // ファイル変更検知時: エクスプローラーのリフレッシュと通知
+                if let Some(ref p) = self.root_path {
+                    let root_clone = p.clone();
+                    self.left_sidebar.update(cx, |sidebar, cx| {
+                        sidebar.set_root(Some(root_clone), cx);
+                    });
+                }
+            }
         }
     }
 
@@ -121,50 +144,108 @@ impl Workspace {
         match action {
             PluginAction::OpenTab { path, title, content } => {
                 self.editor_area.update(cx, |editor, cx| {
-                    editor.open_tab(path, title.clone(), content, cx);
+                    editor.open_tab(path, title, content, cx);
                 });
-                
-                if cx.has_global::<PluginManagerGlobal>() {
-                    let pm_entity = cx.global::<PluginManagerGlobal>().0.clone();
-                    pm_entity.update(cx, |pm, _cx| {
-                        pm.dispatch_event(PluginEvent::FileOpened { path: title });
-                    });
-                }
             }
-            PluginAction::ShowNotification { message } => {
-                println!("UI Notification: {}", message);
+            PluginAction::CloseTab { title } => {
+                self.editor_area.update(cx, |editor, cx| {
+                    if let Some(pos) = editor.tabs.iter().position(|t| t.title == title) {
+                        editor.close_tab(pos, cx);
+                    }
+                });
             }
             PluginAction::OpenPanel { id } => {
-                self.left_sidebar.update(cx, |sidebar, cx| {
-                    sidebar.set_active_panel(id.clone(), cx);
-                });
-                self.state.left_sidebar_open = true;
+                if id == "git_sidebar" {
+                    self.left_sidebar.update(cx, |ls, cx| {
+                        ls.set_active_panel("git_sidebar".to_string(), cx);
+                    });
+                    self.state.left_sidebar_open = true;
+                    self.schedule_save(cx);
+                } else if id == "explorer" {
+                    self.left_sidebar.update(cx, |ls, cx| {
+                        ls.set_active_panel("explorer".to_string(), cx);
+                    });
+                    self.state.left_sidebar_open = true;
+                    self.schedule_save(cx);
+                } else if id == "search" {
+                    self.left_sidebar.update(cx, |ls, cx| {
+                        ls.set_active_panel("search".to_string(), cx);
+                    });
+                    self.state.left_sidebar_open = true;
+                    self.schedule_save(cx);
+                } else if id == "terminal" {
+                    self.state.bottom_panel_open = true;
+                    self.bottom_panel.update(cx, |bp, cx| {
+                        bp.current_tab = "TERMINAL";
+                        cx.notify();
+                    });
+                    self.schedule_save(cx);
+                } else if id == "problems" {
+                    self.state.bottom_panel_open = true;
+                    self.bottom_panel.update(cx, |bp, cx| {
+                        bp.current_tab = "PROBLEMS";
+                        cx.notify();
+                    });
+                    self.schedule_save(cx);
+                } else if id == "settings" {
+                    self.editor_area.update(cx, |ea, cx| {
+                        ea.open_settings(cx);
+                    });
+                }
                 cx.notify();
             }
-            PluginAction::UpdateSetting { key, value } => {
-                if cx.has_global::<crate::settings::SettingsGlobal>() {
-                    let store = cx.global::<crate::settings::SettingsGlobal>().0.clone();
-                    store.write().unwrap().set(&key, value);
-                    println!("UI Action: Updated Setting");
-                }
-            }
-            PluginAction::TerminalWrite { text } => {
-                self.bottom_panel.update(cx, |panel, cx| {
-                    panel.write_log(text, cx);
+            PluginAction::ClosePanel { .. } => {}
+            PluginAction::ShowNotification { message } => {
+                self.bottom_panel.update(cx, |bp, cx| {
+                    bp.write_log(format!("[Notification] {}", message), cx);
                 });
             }
             PluginAction::TerminalClear => {
-                self.bottom_panel.update(cx, |panel, cx| {
-                    panel.logs.clear();
+                self.bottom_panel.update(cx, |bp, cx| {
+                    bp.logs.clear();
                     cx.notify();
+                });
+            }
+            PluginAction::SaveActiveTab => {
+                self.editor_area.update(cx, |ea, cx| {
+                    ea.save_active_tab(cx);
+                });
+            }
+            PluginAction::ToggleSidebar => {
+                self.state.left_sidebar_open = !self.state.left_sidebar_open;
+                self.schedule_save(cx);
+                cx.notify();
+            }
+            PluginAction::ToggleTerminal => {
+                self.state.bottom_panel_open = !self.state.bottom_panel_open;
+                self.schedule_save(cx);
+                cx.notify();
+            }
+            PluginAction::OpenFileFinder => {
+                let root = self.root_path.clone();
+                self.command_palette.update(cx, |cp, cx| {
+                    cp.open_file_search(root.as_deref(), cx);
+                });
+            }
+            PluginAction::OpenCommandPalette => {
+                self.command_palette.update(cx, |cp, cx| {
+                    cp.open_command_palette(cx);
+                });
+            }
+            PluginAction::OpenKeybindings => {
+                self.editor_area.update(cx, |ea, cx| {
+                    ea.open_keybindings(cx);
+                });
+            }
+            PluginAction::OpenSettings => {
+                self.editor_area.update(cx, |ea, cx| {
+                    ea.open_settings(cx);
                 });
             }
             _ => {}
         }
     }
-}
 
-impl Workspace {
     fn render_left_sidebar(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         if !self.state.left_sidebar_open {
             return None;
@@ -181,7 +262,7 @@ impl Workspace {
                         .w(gpui::px(4.0))
                         .cursor_col_resize()
                         .hover(|s| s.bg(gpui::rgb(0x38bdf8)))
-                        .on_mouse_down(MouseButton::Left, cx.listener(|workspace, _: &MouseDownEvent, _window, cx| {
+                        .on_mouse_down(MouseButton::Left, cx.listener(|workspace, _event: &MouseDownEvent, _window, cx| {
                             workspace.resizing_left = true;
                             cx.notify();
                         }))
@@ -240,6 +321,10 @@ impl Workspace {
 
 impl Render for Workspace {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.poll_file_watcher(cx);
+
+        let root_path_ref = self.root_path.clone();
+
         div()
             .track_focus(&self.focus_handle)
             .size_full()
@@ -292,6 +377,17 @@ impl Render for Workspace {
                 workspace.schedule_save(cx);
                 cx.notify();
             }))
+            .on_action(cx.listener(move |workspace, _: &OpenFileFinder, _window, cx| {
+                let rp = root_path_ref.clone();
+                workspace.command_palette.update(cx, |pal, cx| {
+                    pal.open_file_search(rp.as_deref(), cx);
+                });
+            }))
+            .on_action(cx.listener(|workspace, _: &OpenCommandPalette, _window, cx| {
+                workspace.command_palette.update(cx, |pal, cx| {
+                    pal.open_command_palette(cx);
+                });
+            }))
             .child(self.title_bar.clone())
             .child(
                 div().flex_grow(1.).flex().flex_row()
@@ -308,5 +404,6 @@ impl Render for Workspace {
                     .children(self.render_right_sidebar(cx))
             )
             .child(self.status_bar.clone())
+            .child(self.command_palette.clone())
     }
 }

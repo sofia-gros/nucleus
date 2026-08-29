@@ -67,6 +67,14 @@ impl Render for StatusBar {
                     .child(
                         div().px_2().h_full().flex().items_center().gap_1().text_color(cx.theme().muted_foreground)
                             .hover(|s| s.bg(cx.theme().muted).text_color(cx.theme().foreground)).cursor_pointer()
+                            .on_mouse_down(MouseButton::Left, cx.listener(|_bar, _event, _window, cx| {
+                                if cx.has_global::<crate::plugin_manager::PluginManagerGlobal>() {
+                                    let pm_global = cx.global::<crate::plugin_manager::PluginManagerGlobal>().0.clone();
+                                    pm_global.update(cx, |pm, _| {
+                                        pm.dispatch_action(crate::plugin_manager::action::PluginAction::OpenPanel { id: "problems".to_string() });
+                                    });
+                                }
+                            }))
                             .child("⨂ 0  ⚠ 0")
                     )
             )

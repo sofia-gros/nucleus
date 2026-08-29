@@ -1,5 +1,8 @@
 /// バッファテキストから画面表示用テキストへの変換パイプライン（DisplayMap）
 
+pub mod wrap_map;
+pub mod fold_map;
+
 use crate::editor::buffer::point::Point;
 use crate::editor::buffer::TextBuffer;
 
@@ -127,7 +130,6 @@ impl DisplayMap {
                 col += tab_stop;
             } else {
                 display_line.push(ch);
-                col += 1;
             }
         }
         Some(display_line)
@@ -144,7 +146,7 @@ mod tests {
         let display_map = DisplayMap::new();
 
         let display_line = display_map.get_display_line(&buffer, 0).unwrap();
-        assert_eq!(display_line, "    hello"); // 4 spaces for tab
+        assert_eq!(display_line, "    hello");
 
         let pt = Point::new(0, 1);
         let display_pt = display_map.point_to_display_point(&buffer, pt);

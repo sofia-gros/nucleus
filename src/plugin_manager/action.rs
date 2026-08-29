@@ -27,4 +27,11 @@ pub enum PluginAction {
     RegisterSidebarItem { plugin_id: String, id: String, title: String, ui_ast: Value },
     UpdateSidebarItem { plugin_id: String, id: String, title: Option<String>, ui_ast: Value },
     RegisterPanelItem { plugin_id: String, id: String, title: String, ui_ast: Value },
+    SaveActiveTab,
+    ToggleSidebar,
+    ToggleTerminal,
+    OpenFileFinder,
+    OpenCommandPalette,
+    OpenKeybindings,
+    OpenSettings,
 }

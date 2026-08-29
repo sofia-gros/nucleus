@@ -1,51 +1,41 @@
 use gpui::*;
 use gpui_component::*;
-use workspace::Workspace;
-use plugin_manager::PluginManager;
+use gpui_component::theme::{Theme, ThemeMode};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-use plugin_manager::PluginManagerGlobal;
-use gpui_component::theme::{Theme, ThemeMode};
-
-pub mod editor;
-pub mod plugin_manager;
-pub mod workspace;
-pub mod settings;
-pub mod file_system;
-pub mod project;
-pub mod lsp;
-pub mod terminal;
-pub mod process;
-pub mod keybindings;
-pub mod theme;
-pub mod search;
-pub mod util;
-
-use settings::{SettingsStore, SettingsGlobal};
 use std::sync::{Arc, RwLock};
+use nucleus::workspace::Workspace;
+use nucleus::plugin_manager::{PluginManager, PluginManagerGlobal};
+use nucleus::settings::{SettingsStore, SettingsGlobal};
+use nucleus::*;
 
 fn main() {
+    let mut profiler = util::profiler::StartupProfiler::start();
+
     let (action_tx, action_rx) = mpsc::sync_channel(1024);
     let settings_store = Arc::new(RwLock::new(SettingsStore::new()));
     let settings_for_pm = settings_store.clone();
+    profiler.mark("Settings Loaded");
 
     let app = gpui_platform::application().with_assets(gpui_component_assets::Assets);
+    profiler.mark("GPUI Application Created");
 
     app.run(move |cx| {
         let settings_store_clone = settings_store.clone();
         cx.set_global(SettingsGlobal(settings_store));
 
         let pm_model = cx.new(|_cx| {
-            let mut pm = PluginManager::new(action_tx.clone(), settings_for_pm).unwrap();
-            if let Err(e) = pm.discover_and_load(Path::new("plugins")) {
-                eprintln!("Failed to load plugins: {}", e);
-            }
-            pm
+            PluginManager::new(action_tx.clone(), settings_for_pm).unwrap()
         });
         
         cx.set_global(PluginManagerGlobal(pm_model.clone()));
+
+        let debug_mgr = Arc::new(RwLock::new(nucleus::debug::DebugManager::new()));
+        cx.set_global(nucleus::debug::DebugGlobal(debug_mgr));
+
         // This must be called before using any GPUI Component features.
         gpui_component::init(cx);
+        profiler.mark("GPUI Component Init");
 
         // Sync theme with OS appearance
         let appearance = cx.window_appearance();
@@ -56,6 +46,7 @@ fn main() {
         Theme::change(mode, None, cx);
 
         keybindings::init_keybindings(cx);
+        profiler.mark("Keybindings Init");
 
         let window_cx = cx.to_async();
         cx.spawn(|_cx: &mut gpui::AsyncApp| async move {
@@ -90,13 +81,32 @@ fn main() {
                     traffic_light_position: None,
                 });
                 let _ = cx.open_window(options, move |window, cx| {
+                    profiler.mark("Window Opened");
+                    println!("{}", profiler.summary());
+
                     let view = cx.new(|cx| Workspace::new(root_path, cx));
                     view.update(cx, |workspace, cx| {
                         workspace.focus_handle.focus(window, cx);
                     });
                     
                     let view_clone = view.clone();
-                    spawn_plugin_event_loop(cx, action_tx.clone(), action_rx, pm_model, view_clone);
+                    spawn_plugin_event_loop(cx, action_tx.clone(), action_rx, pm_model.clone(), view_clone);
+
+                    // 非同期でプラグインをロード
+                    let pm_for_async = pm_model.clone();
+                    cx.spawn(|cx: &mut gpui::AsyncApp| {
+                        let async_cx = cx.clone();
+                        async move {
+                            let _ = async_cx.update(|cx| {
+                                pm_for_async.update(cx, |pm, cx| {
+                                    if let Err(e) = pm.discover_and_load(Path::new("plugins")) {
+                                        eprintln!("Failed to load plugins: {}", e);
+                                    }
+                                    cx.notify();
+                                });
+                            });
+                        }
+                    }).detach();
 
                     // This first level on the window, should be a Root.
                     cx.new(|cx| Root::new(view, window, cx))

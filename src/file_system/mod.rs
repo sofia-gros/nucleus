@@ -1,12 +1,20 @@
+/// ファイルシステム抽象化およびディレクトリ走査モジュール
+
+pub mod watcher;
+pub mod gitignore;
+
 use std::path::{Path, PathBuf};
 use std::fs;
+use gitignore::GitIgnore;
 
+/// ファイルの種類（ファイルまたはディレクトリ）
 #[derive(Clone, Debug, PartialEq)]
 pub enum FileType {
     File,
     Directory,
 }
 
+/// ファイル・ディレクトリエントリ
 #[derive(Clone, Debug)]
 pub struct FileEntry {
     pub name: String,
@@ -38,10 +46,16 @@ impl FileEntry {
     }
 
     pub fn read_dir(path: &Path) -> Option<Vec<FileEntry>> {
-        Self::read_dir_with_depth(path, 0)
+        let gitignore = if let Ok(content) = fs::read_to_string(path.join(".gitignore")) {
+            GitIgnore::parse(&content)
+        } else {
+            GitIgnore::default()
+        };
+
+        Self::read_dir_with_depth(path, 0, &gitignore)
     }
 
-    fn read_dir_with_depth(path: &Path, depth: usize) -> Option<Vec<FileEntry>> {
+    fn read_dir_with_depth(path: &Path, depth: usize, gitignore: &GitIgnore) -> Option<Vec<FileEntry>> {
         if depth > 5 {
             return None; // Max depth
         }
@@ -49,18 +63,18 @@ impl FileEntry {
         let mut entries = Vec::new();
         if let Ok(dir) = fs::read_dir(path) {
             for entry in dir.filter_map(Result::ok) {
-                let file_name = entry.file_name().to_string_lossy().to_string();
-                if file_name == ".git" || file_name == "target" || file_name == "node_modules" {
+                let entry_path = entry.path();
+                if gitignore.is_ignored(&entry_path) {
                     continue;
                 }
                 
-                let mut fe = FileEntry::new(entry.path());
+                let mut fe = FileEntry::new(entry_path.clone());
                 if fe.file_type == FileType::Directory {
-                    fe.children = Self::read_dir_with_depth(&entry.path(), depth + 1);
+                    fe.children = Self::read_dir_with_depth(&entry_path, depth + 1, gitignore);
                 }
                 entries.push(fe);
             }
-            // Sort: directories first, then alphabetical
+            // フォルダ優先、名前順ソート
             entries.sort_by(|a, b| {
                 if a.file_type == b.file_type {
                     a.name.cmp(&b.name)

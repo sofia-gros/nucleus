@@ -208,8 +208,12 @@ impl TitleBar {
                     Self::menu_entry("Open Folder...", Some("Ctrl+K Ctrl+O"), cx, |_window, _cx| {}),
                     Self::menu_separator(cx),
                     Self::menu_entry("Save", Some("Ctrl+S"), cx, |_window, cx| {
-                        // バッファ保存
-                        cx.notify();
+                        if cx.has_global::<crate::plugin_manager::PluginManagerGlobal>() {
+                            let pm = cx.global::<crate::plugin_manager::PluginManagerGlobal>().0.clone();
+                            pm.update(cx, |pm, _| {
+                                pm.dispatch_action(crate::plugin_manager::action::PluginAction::SaveActiveTab);
+                            });
+                        }
                     }),
                     Self::menu_entry("Save As...", Some("Ctrl+Shift+S"), cx, |_window, _cx| {}),
                     Self::menu_separator(cx),
@@ -225,7 +229,14 @@ impl TitleBar {
                     Self::menu_entry("Copy", Some("Ctrl+C"), cx, |_window, _cx| {}),
                     Self::menu_entry("Paste", Some("Ctrl+V"), cx, |_window, _cx| {}),
                     Self::menu_separator(cx),
-                    Self::menu_entry("Find", Some("Ctrl+F"), cx, |_window, _cx| {}),
+                    Self::menu_entry("Find in Files", Some("Ctrl+Shift+F"), cx, |_window, cx| {
+                        if cx.has_global::<crate::plugin_manager::PluginManagerGlobal>() {
+                            let pm = cx.global::<crate::plugin_manager::PluginManagerGlobal>().0.clone();
+                            pm.update(cx, |pm, _| {
+                                pm.dispatch_action(crate::plugin_manager::action::PluginAction::OpenPanel { id: "search".to_string() });
+                            });
+                        }
+                    }),
                 ],
                 "Selection" => vec![
                     Self::menu_entry("Select All", Some("Ctrl+A"), cx, |_window, _cx| {}),
@@ -233,11 +244,27 @@ impl TitleBar {
                     Self::menu_entry("Shrink Selection", Some("Shift+Alt+Left"), cx, |_window, _cx| {}),
                 ],
                 "View" => vec![
+                    Self::menu_entry("Command Palette...", Some("Ctrl+Shift+P"), cx, |_window, cx| {
+                        if cx.has_global::<crate::plugin_manager::PluginManagerGlobal>() {
+                            let pm = cx.global::<crate::plugin_manager::PluginManagerGlobal>().0.clone();
+                            pm.update(cx, |pm, _| {
+                                pm.dispatch_action(crate::plugin_manager::action::PluginAction::OpenCommandPalette);
+                            });
+                        }
+                    }),
                     Self::menu_entry("Explorer", Some("Ctrl+Shift+E"), cx, |_window, cx| {
                         if cx.has_global::<crate::plugin_manager::PluginManagerGlobal>() {
                             let pm = cx.global::<crate::plugin_manager::PluginManagerGlobal>().0.clone();
                             pm.update(cx, |pm, _| {
                                 pm.dispatch_action(crate::plugin_manager::action::PluginAction::OpenPanel { id: "explorer".to_string() });
+                            });
+                        }
+                    }),
+                    Self::menu_entry("Search", Some("Ctrl+Shift+F"), cx, |_window, cx| {
+                        if cx.has_global::<crate::plugin_manager::PluginManagerGlobal>() {
+                            let pm = cx.global::<crate::plugin_manager::PluginManagerGlobal>().0.clone();
+                            pm.update(cx, |pm, _| {
+                                pm.dispatch_action(crate::plugin_manager::action::PluginAction::OpenPanel { id: "search".to_string() });
                             });
                         }
                     }),
@@ -250,17 +277,39 @@ impl TitleBar {
                         }
                     }),
                     Self::menu_separator(cx),
-                    Self::menu_entry("Toggle Primary Sidebar", Some("Ctrl+B"), cx, |_window, _cx| {}),
-                    Self::menu_entry("Toggle Terminal", Some("Ctrl+`"), cx, |_window, _cx| {}),
+                    Self::menu_entry("Toggle Primary Sidebar", Some("Ctrl+B"), cx, |_window, cx| {
+                        if cx.has_global::<crate::plugin_manager::PluginManagerGlobal>() {
+                            let pm = cx.global::<crate::plugin_manager::PluginManagerGlobal>().0.clone();
+                            pm.update(cx, |pm, _| {
+                                pm.dispatch_action(crate::plugin_manager::action::PluginAction::ToggleSidebar);
+                            });
+                        }
+                    }),
+                    Self::menu_entry("Toggle Terminal", Some("Ctrl+`"), cx, |_window, cx| {
+                        if cx.has_global::<crate::plugin_manager::PluginManagerGlobal>() {
+                            let pm = cx.global::<crate::plugin_manager::PluginManagerGlobal>().0.clone();
+                            pm.update(cx, |pm, _| {
+                                pm.dispatch_action(crate::plugin_manager::action::PluginAction::ToggleTerminal);
+                            });
+                        }
+                    }),
                 ],
                 "Run" => vec![
-                    Self::menu_entry("Start Debugging", Some("F5"), cx, |_window, _cx| {}),
+                    Self::menu_entry("Start Debugging", Some("F5"), cx, |_window, cx| {
+                        if cx.has_global::<crate::plugin_manager::PluginManagerGlobal>() {
+                            let pm = cx.global::<crate::plugin_manager::PluginManagerGlobal>().0.clone();
+                            pm.update(cx, |pm, _| {
+                                pm.dispatch_action(crate::plugin_manager::action::PluginAction::ShowNotification {
+                                    message: "Starting Debug Session (DAP)...".to_string(),
+                                });
+                            });
+                        }
+                    }),
                     Self::menu_entry("Run Without Debugging", Some("Ctrl+F5"), cx, |_window, _cx| {}),
                     Self::menu_entry("Stop Debugging", Some("Shift+F5"), cx, |_window, _cx| {}),
                 ],
                 "Terminal" => vec![
                     Self::menu_entry("New Terminal", Some("Ctrl+Shift+`"), cx, |_window, cx| {
-                        // ターミナル作成
                         if cx.has_global::<crate::plugin_manager::PluginManagerGlobal>() {
                             let pm = cx.global::<crate::plugin_manager::PluginManagerGlobal>().0.clone();
                             pm.update(cx, |pm, _| {
@@ -278,6 +327,23 @@ impl TitleBar {
                     }),
                 ],
                 "Help" => vec![
+                    Self::menu_entry("Settings", Some("Ctrl+,"), cx, |_window, cx| {
+                        if cx.has_global::<crate::plugin_manager::PluginManagerGlobal>() {
+                            let pm = cx.global::<crate::plugin_manager::PluginManagerGlobal>().0.clone();
+                            pm.update(cx, |pm, _| {
+                                pm.dispatch_action(crate::plugin_manager::action::PluginAction::OpenSettings);
+                            });
+                        }
+                    }),
+                    Self::menu_entry("Keyboard Shortcuts", Some("Ctrl+K Ctrl+S"), cx, |_window, cx| {
+                        if cx.has_global::<crate::plugin_manager::PluginManagerGlobal>() {
+                            let pm = cx.global::<crate::plugin_manager::PluginManagerGlobal>().0.clone();
+                            pm.update(cx, |pm, _| {
+                                pm.dispatch_action(crate::plugin_manager::action::PluginAction::OpenKeybindings);
+                            });
+                        }
+                    }),
+                    Self::menu_separator(cx),
                     Self::menu_entry("Documentation", None, cx, |_window, _cx| {}),
                     Self::menu_entry("About Nucleus", None, cx, |_window, cx| {
                         if cx.has_global::<crate::plugin_manager::PluginManagerGlobal>() {

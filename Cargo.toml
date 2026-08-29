@@ -3,6 +3,12 @@ name = "nucleus"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = [
+    ".",
+    "crates/nucleus-plugin-sdk"
+]
+
 [dependencies]
 gpui = { git = "https://github.com/zed-industries/zed" }
 gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit"] }
@@ -19,3 +25,4 @@ dirs = "6.0.0"
 syntect = "5.2.0"
 ropey = "1.6"
 portable-pty = "0.8"
+notify = "7.0"

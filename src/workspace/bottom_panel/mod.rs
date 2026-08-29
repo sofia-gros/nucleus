@@ -1,15 +1,26 @@
-/// ボトムパネルおよび PTY ターミナル UI コンポーネント
+/// ボトムパネルおよび PTY ターミナル・PROBLEMS・OUTPUT UI コンポーネント
 
 use gpui::*;
 use gpui_component::theme::ActiveTheme;
 use crate::terminal::TerminalSession;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// 診断情報（問題）の表示用アイテム
+#[derive(Clone, Debug)]
+pub struct ProblemItem {
+    pub file_path: String,
+    pub line: usize,
+    pub column: usize,
+    pub message: String,
+    pub is_error: bool,
+}
 
 pub struct BottomPanel {
     pub current_tab: &'static str,
     pub sessions: Vec<TerminalSession>,
     pub active_session: usize,
     pub logs: Vec<String>,
+    pub problems: Vec<ProblemItem>,
     pub input_buffer: String,
     pub focus_handle: FocusHandle,
 }
@@ -21,11 +32,11 @@ impl BottomPanel {
             sessions: Vec::new(),
             active_session: 0,
             logs: Vec::new(),
+            problems: Vec::new(),
             input_buffer: String::new(),
             focus_handle: cx.focus_handle(),
         };
 
-        // 初期ターミナルセッションの作成
         if let Ok(session) = TerminalSession::new("term-1".to_string(), "pwsh".to_string(), None) {
             panel.sessions.push(session);
         }
@@ -61,6 +72,12 @@ impl BottomPanel {
         cx.notify();
     }
 
+    /// 診断情報（エラー・警告）の更新
+    pub fn set_problems(&mut self, problems: Vec<ProblemItem>, cx: &mut Context<Self>) {
+        self.problems = problems;
+        cx.notify();
+    }
+
     /// 現在のセッションへの入力送信
     pub fn send_input(&mut self, input: &str, cx: &mut Context<Self>) {
         if let Some(session) = self.sessions.get(self.active_session) {
@@ -76,7 +93,13 @@ impl Render for BottomPanel {
         let is_output = self.current_tab == "OUTPUT";
         let is_problems = self.current_tab == "PROBLEMS";
 
-        // メインタブバー (TERMINAL, OUTPUT, PROBLEMS)
+        let problems_tab_label = if self.problems.is_empty() {
+            "PROBLEMS".to_string()
+        } else {
+            format!("PROBLEMS ({})", self.problems.len())
+        };
+
+        // メインタブバー
         let main_tabs = div()
             .flex()
             .items_center()
@@ -132,10 +155,10 @@ impl Render for BottomPanel {
                         this.current_tab = "PROBLEMS";
                         cx.notify();
                     }))
-                    .child("PROBLEMS")
+                    .child(problems_tab_label)
             );
 
-        // ターミナル専用サブバー（複数ターミナルタブ & ＋ボタン）
+        // ターミナル専用サブバー
         let mut term_tabs = div().flex().items_center().gap_1();
         if is_terminal {
             for (idx, sess) in self.sessions.iter().enumerate() {
@@ -173,7 +196,6 @@ impl Render for BottomPanel {
                 );
             }
 
-            // 新規ターミナル作成ボタン (+)
             term_tabs = term_tabs.child(
                 div()
                     .px_2()
@@ -210,12 +232,12 @@ impl Render for BottomPanel {
                     );
                 }
 
-                // 入力用プロンプトバー
                 let input_bar = div()
                     .px_3()
                     .py_1p5()
                     .border_t_1()
                     .border_color(cx.theme().border)
+                    .bg(cx.theme().muted.opacity(0.15))
                     .flex()
                     .items_center()
                     .gap_2()
@@ -228,11 +250,10 @@ impl Render for BottomPanel {
                             .child(if self.input_buffer.is_empty() {
                                 "Type command here and press Enter (or click Quick Commands below)...".to_string()
                             } else {
-                                self.input_buffer.clone()
+                                format!("{}_", self.input_buffer)
                             })
                     )
                     .child(
-                        // クイックコマンドボタン群
                         div().flex().gap_1()
                             .child(
                                 div().px_1p5().py_0p5().bg(cx.theme().muted).rounded_sm().text_xs().cursor_pointer()
@@ -260,7 +281,42 @@ impl Render for BottomPanel {
                             )
                     );
 
-                div().size_full().flex().flex_col().child(term_output).child(input_bar).into_any_element()
+                div()
+                    .size_full()
+                    .flex()
+                    .flex_col()
+                    .track_focus(&self.focus_handle)
+                    .cursor(CursorStyle::IBeam)
+                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
+                        this.focus_handle.focus(window, cx);
+                    }))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                        let key = &event.keystroke.key;
+                        if key == "enter" {
+                            let cmd = format!("{}\r\n", this.input_buffer);
+                            this.send_input(&cmd, cx);
+                            this.input_buffer.clear();
+                            cx.notify();
+                        } else if key == "backspace" {
+                            this.input_buffer.pop();
+                            cx.notify();
+                        } else if event.keystroke.modifiers.control && key == "c" {
+                            this.send_input("\x03", cx);
+                            this.input_buffer.clear();
+                            cx.notify();
+                        } else if !event.keystroke.modifiers.control && !event.keystroke.modifiers.alt {
+                            if key.len() == 1 {
+                                this.input_buffer.push_str(key);
+                                cx.notify();
+                            } else if key == "space" {
+                                this.input_buffer.push(' ');
+                                cx.notify();
+                            }
+                        }
+                    }))
+                    .child(term_output)
+                    .child(input_bar)
+                    .into_any_element()
             } else {
                 div().p_4().text_xs().text_color(cx.theme().muted_foreground).child("No active terminal session. Click '+' to open one.").into_any_element()
             }
@@ -271,7 +327,63 @@ impl Render for BottomPanel {
             }
             log_list.into_any_element()
         } else {
-            div().p_4().text_xs().text_color(cx.theme().muted_foreground).child("No problems detected in the workspace.").into_any_element()
+            // PROBLEMS タブ
+            if self.problems.is_empty() {
+                div().p_4().text_xs().text_color(cx.theme().muted_foreground).child("No problems detected in the workspace.").into_any_element()
+            } else {
+                let mut prob_list = div().flex().flex_col().p_2().overflow_hidden().size_full();
+                for prob in &self.problems {
+                    let file_path = prob.file_path.clone();
+                    let line = prob.line;
+                    let col = prob.column;
+                    let msg = prob.message.clone();
+                    let is_err = prob.is_error;
+                    let file_name = Path::new(&file_path).file_name().unwrap_or_default().to_string_lossy().to_string();
+
+                    let fn_title_for_tab = file_name.clone();
+                    let row = div()
+                        .px_2()
+                        .py_1()
+                        .rounded_sm()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .hover(|s| s.bg(cx.theme().secondary))
+                        .cursor_pointer()
+                        .on_mouse_down(MouseButton::Left, cx.listener(move |_this, _, _, cx| {
+                            if let Ok(content) = std::fs::read_to_string(&file_path) {
+                                if cx.has_global::<crate::plugin_manager::PluginManagerGlobal>() {
+                                    let pm_global = cx.global::<crate::plugin_manager::PluginManagerGlobal>().0.clone();
+                                    let fp = file_path.clone();
+                                    let fn_title = fn_title_for_tab.clone();
+                                    pm_global.update(cx, |pm, _| {
+                                        pm.dispatch_action(crate::plugin_manager::action::PluginAction::OpenTab {
+                                            path: fp,
+                                            title: fn_title,
+                                            content,
+                                        });
+                                    });
+                                }
+                            }
+                        }))
+                        .child(
+                            div().flex().items_center().gap_2()
+                                .child(
+                                    div().text_xs().font_weight(FontWeight::BOLD)
+                                        .text_color(if is_err { gpui::rgb(0xef4444) } else { gpui::rgb(0xeab308) })
+                                        .child(if is_err { "⨂" } else { "⚠" })
+                                )
+                                .child(div().text_xs().text_color(cx.theme().foreground).child(msg))
+                        )
+                        .child(
+                            div().text_xs().text_color(cx.theme().muted_foreground)
+                                .child(format!("{} [{}:{}]", file_name, line, col))
+                        );
+
+                    prob_list = prob_list.child(row);
+                }
+                prob_list.into_any_element()
+            }
         };
 
         div()

@@ -2,7 +2,7 @@
 
 use gpui::{App, KeyBinding};
 use crate::editor::actions::*;
-use crate::workspace::{ToggleBottomPanel, ToggleLeftSidebar, ToggleRightSidebar};
+use crate::workspace::{OpenFileFinder, OpenCommandPalette, ToggleBottomPanel, ToggleLeftSidebar, ToggleRightSidebar};
 
 /// アプリケーション全体の標準キーバインディングを登録する
 pub fn init_keybindings(cx: &mut App) {
@@ -11,6 +11,8 @@ pub fn init_keybindings(cx: &mut App) {
         KeyBinding::new("ctrl-b", ToggleLeftSidebar, None),
         KeyBinding::new("ctrl-j", ToggleBottomPanel, None),
         KeyBinding::new("ctrl-r", ToggleRightSidebar, None),
+        KeyBinding::new("ctrl-p", OpenFileFinder, None),
+        KeyBinding::new("ctrl-shift-p", OpenCommandPalette, None),
 
         // エディタ操作
         KeyBinding::new("ctrl-s", Save, None),
@@ -29,5 +31,12 @@ pub fn init_keybindings(cx: &mut App) {
         KeyBinding::new("backspace", Backspace, None),
         KeyBinding::new("delete", Delete, None),
         KeyBinding::new("enter", InsertNewline, None),
+
+        // LSP 操作
+        KeyBinding::new("f12", GoToDefinition, None),
+        KeyBinding::new("shift-f12", FindReferences, None),
+        KeyBinding::new("f2", Rename, None),
+        KeyBinding::new("ctrl-.", QuickFix, None),
+        KeyBinding::new("shift-alt-f", FormatDocument, None),
     ]);
 }

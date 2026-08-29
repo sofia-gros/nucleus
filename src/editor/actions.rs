@@ -1,8 +1,8 @@
-//! エディタに対するアクション定義モジュール
+/// エディタに対するアクション定義モジュール
 
 use gpui::actions;
 
-// エディタの編集・移動・保存アクション
+// エディタの編集・移動・保存・LSPアクション
 actions!(
     editor,
     [
@@ -28,6 +28,12 @@ actions!(
         DeleteLine,
         Cut,
         Copy,
-        Paste
+        Paste,
+        GoToDefinition,
+        ShowHover,
+        FindReferences,
+        Rename,
+        QuickFix,
+        FormatDocument
     ]
 );

@@ -7,6 +7,10 @@ pub mod selection;
 pub mod cursor;
 pub mod history;
 pub mod actions;
+pub mod completion;
+pub mod hover;
+pub mod find_replace;
+pub mod bracket_match;
 
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -98,7 +102,19 @@ impl Editor {
         Ok(())
     }
 
-    /// 変更されているか（dirtyフラグ）を判定
+    /// エディタのテキストを外部更新して同期
+    pub fn set_text(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.editor_state.update(cx, |state, cx| {
+            state.set_value(text.to_string(), window, cx);
+        });
+        let mut buf = self.buffer.write().unwrap();
+        *buf = TextBuffer::new(text);
+        buf.file_path = self.file_path.clone();
+        buf.is_dirty = false;
+        cx.notify();
+    }
+
+    /// バッファが変更されているか確認
     pub fn is_dirty(&self, cx: &App) -> bool {
         let current_text = self.editor_state.read(cx).value();
         let buf = self.buffer.read().unwrap();

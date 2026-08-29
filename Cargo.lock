@@ -4378,6 +4378,7 @@ dependencies = [
  "gpui-component",
  "gpui-component-assets",
  "gpui_platform",
+ "notify",
  "portable-pty",
  "ropey 1.6.1",
  "serde",
@@ -4385,6 +4386,14 @@ dependencies = [
  "syntect",
  "toml 1.1.4+spec-1.1.0",
  "wasmtime",
+]
+
+[[package]]
+name = "nucleus-plugin-sdk"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
