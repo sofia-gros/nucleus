@@ -238,8 +238,46 @@ impl Render for BottomPanel {
                     .text_xs()
                     .flex()
                     .flex_col()
+                    .gap_0p5()
                     .overflow_hidden()
                     .bg(cx.theme().background)
+                    .track_focus(&self.focus_handle)
+                    .cursor(CursorStyle::IBeam)
+                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
+                        this.focus_handle.focus(window, cx);
+                    }))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                        let key = &event.keystroke.key;
+                        if event.keystroke.modifiers.control && key == "c" {
+                            this.send_input("\x03", cx);
+                            this.input_buffer.clear();
+                            cx.notify();
+                        } else if event.keystroke.modifiers.control && key == "l" {
+                            if let Some(session) = this.sessions.get(this.active_session) {
+                                if let Ok(mut lines) = session.output_lines.write() {
+                                    lines.clear();
+                                }
+                            }
+                            cx.notify();
+                        } else if key == "enter" {
+                            let cmd = format!("{}\r\n", this.input_buffer);
+                            this.send_input(&cmd, cx);
+                            this.input_buffer.clear();
+                            this.scroll_offset = 0; // 最新行へスクロール
+                            cx.notify();
+                        } else if key == "backspace" {
+                            this.input_buffer.pop();
+                            cx.notify();
+                        } else if !event.keystroke.modifiers.control && !event.keystroke.modifiers.alt {
+                            if key.len() == 1 {
+                                this.input_buffer.push_str(key);
+                                cx.notify();
+                            } else if key == "space" {
+                                this.input_buffer.push(' ');
+                                cx.notify();
+                            }
+                        }
+                    }))
                     .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _, cx| {
                         let delta = match event.delta {
                             ScrollDelta::Pixels(p) => (f32::from(p.y) / 20.0).round() as i32,
@@ -254,9 +292,18 @@ impl Render for BottomPanel {
                     }));
 
                 for line in visible_lines {
-                    term_output = term_output.child(
-                        div().text_color(cx.theme().foreground).child(line.clone())
-                    );
+                    if !line.is_empty() {
+                        term_output = term_output.child(
+                            div()
+                                .w_full()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
+                                .text_color(cx.theme().foreground)
+                                .child(line.clone())
+                        );
+                    }
                 }
 
                 let input_bar = div()
@@ -264,26 +311,34 @@ impl Render for BottomPanel {
                     .py_1p5()
                     .border_t_1()
                     .border_color(cx.theme().border)
-                    .bg(cx.theme().muted.opacity(0.15))
+                    .bg(cx.theme().muted.opacity(0.2))
                     .flex()
                     .items_center()
-                    .gap_2()
-                    .child(div().text_xs().font_weight(FontWeight::BOLD).text_color(gpui::rgb(0x007acc)).child(">"))
+                    .justify_between()
                     .child(
                         div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
                             .flex_1()
-                            .text_xs()
-                            .text_color(cx.theme().foreground)
-                            .child(if self.input_buffer.is_empty() {
-                                "Type command here and press Enter (or click Quick Commands below)...".to_string()
-                            } else {
-                                format!("{}_", self.input_buffer)
-                            })
+                            .child(div().text_xs().font_weight(FontWeight::BOLD).text_color(gpui::rgb(0x007acc)).child("PS >"))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .text_xs()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(cx.theme().foreground)
+                                    .child(if self.input_buffer.is_empty() {
+                                        "Type command here and press Enter (or type directly in terminal above)...".to_string()
+                                    } else {
+                                        format!("{}_", self.input_buffer)
+                                    })
+                            )
                     )
                     .child(
-                        div().flex().gap_1()
+                        div().flex().gap_1p5()
                             .child(
-                                div().px_1p5().py_0p5().bg(cx.theme().muted).rounded_sm().text_xs().cursor_pointer()
+                                div().px_2().py_0p5().bg(cx.theme().muted).rounded_sm().text_xs().cursor_pointer()
                                     .hover(|s| s.bg(cx.theme().secondary))
                                     .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                                         this.send_input("cargo check\r\n", cx);
@@ -291,7 +346,7 @@ impl Render for BottomPanel {
                                     .child("cargo check")
                             )
                             .child(
-                                div().px_1p5().py_0p5().bg(cx.theme().muted).rounded_sm().text_xs().cursor_pointer()
+                                div().px_2().py_0p5().bg(cx.theme().muted).rounded_sm().text_xs().cursor_pointer()
                                     .hover(|s| s.bg(cx.theme().secondary))
                                     .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                                         this.send_input("cargo test\r\n", cx);
@@ -299,7 +354,7 @@ impl Render for BottomPanel {
                                     .child("cargo test")
                             )
                             .child(
-                                div().px_1p5().py_0p5().bg(cx.theme().muted).rounded_sm().text_xs().cursor_pointer()
+                                div().px_2().py_0p5().bg(cx.theme().muted).rounded_sm().text_xs().cursor_pointer()
                                     .hover(|s| s.bg(cx.theme().secondary))
                                     .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                                         this.send_input("git status\r\n", cx);

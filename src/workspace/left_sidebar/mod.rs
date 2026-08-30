@@ -391,7 +391,7 @@ impl Render for LeftSidebar {
                                     if let Some(staged) = staged_nodes {
                                         if !staged.is_empty() {
                                             sc_layout = sc_layout.child(
-                                                Self::render_git_section("STAGED CHANGES", staged.len(), cx)
+                                                Self::render_git_section("STAGED CHANGES", staged.len(), true, cx)
                                             );
                                             for node in staged {
                                                 sc_layout = sc_layout.child(Self::render_git_file_row(node, true, cx));
@@ -402,7 +402,7 @@ impl Render for LeftSidebar {
                                     // 3. Changes セクション
                                     let changes_count = changes_nodes.map(|n| n.len()).unwrap_or(0);
                                     sc_layout = sc_layout.child(
-                                        Self::render_git_section("CHANGES", changes_count, cx)
+                                        Self::render_git_section("CHANGES", changes_count, false, cx)
                                     );
                                     if let Some(changes) = changes_nodes {
                                         for node in changes {
@@ -644,8 +644,9 @@ impl LeftSidebar {
             .child(results_tree)
     }
 
-    /// Git セクションヘッダー（STAGED CHANGES / CHANGES + 件数バッジ）の描画
-    fn render_git_section(title: &'static str, count: usize, cx: &mut Context<Self>) -> impl IntoElement {
+    /// Git セクションヘッダー（STAGED CHANGES / CHANGES + 件数バッジ + 一括アクションボタン）の描画
+    fn render_git_section(title: &'static str, count: usize, is_staged: bool, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme().clone();
         div()
             .px_3()
             .py_1()
@@ -657,28 +658,112 @@ impl LeftSidebar {
                     .flex()
                     .items_center()
                     .gap_1()
-                    .child(Icon::new(IconName::ChevronDown).size(gpui::px(12.0)).text_color(cx.theme().muted_foreground))
+                    .child(Icon::new(IconName::ChevronDown).size(gpui::px(12.0)).text_color(theme.muted_foreground))
                     .child(
                         div()
                             .text_xs()
                             .font_weight(FontWeight::BOLD)
-                            .text_color(cx.theme().muted_foreground)
+                            .text_color(theme.muted_foreground)
                             .child(title)
                     )
             )
             .child(
                 div()
-                    .px_1p5()
-                    .py_0p5()
-                    .bg(cx.theme().muted)
-                    .text_color(cx.theme().foreground)
-                    .rounded_md()
-                    .text_xs()
-                    .child(format!("{}", count))
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        // 一括アクションボタン (Stage All / Unstage All / Discard All)
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .children(if is_staged {
+                                Some(
+                                    div()
+                                        .px_1()
+                                        .text_xs()
+                                        .text_color(theme.muted_foreground)
+                                        .hover(|s| s.bg(theme.muted).text_color(theme.foreground))
+                                        .rounded_sm()
+                                        .cursor_pointer()
+                                        .on_mouse_down(MouseButton::Left, cx.listener(|_, _, _, cx| {
+                                            cx.stop_propagation();
+                                            if cx.has_global::<crate::plugin_manager::PluginManagerGlobal>() {
+                                                let pm = cx.global::<crate::plugin_manager::PluginManagerGlobal>().0.clone();
+                                                pm.update(cx, |pm, _| {
+                                                    pm.dispatch_event(crate::plugin_manager::event::PluginEvent::CommandExecuted { command: "git.unstage_all".to_string() });
+                                                });
+                                            }
+                                        }))
+                                        .child("—")
+                                )
+                            } else {
+                                None
+                            })
+                            .children(if !is_staged {
+                                Some(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_1()
+                                        .child(
+                                            div()
+                                                .px_1()
+                                                .text_xs()
+                                                .text_color(theme.muted_foreground)
+                                                .hover(|s| s.bg(theme.muted).text_color(theme.foreground))
+                                                .rounded_sm()
+                                                .cursor_pointer()
+                                                .on_mouse_down(MouseButton::Left, cx.listener(|_, _, _, cx| {
+                                                    cx.stop_propagation();
+                                                    if cx.has_global::<crate::plugin_manager::PluginManagerGlobal>() {
+                                                        let pm = cx.global::<crate::plugin_manager::PluginManagerGlobal>().0.clone();
+                                                        pm.update(cx, |pm, _| {
+                                                            pm.dispatch_event(crate::plugin_manager::event::PluginEvent::CommandExecuted { command: "git.discard_all".to_string() });
+                                                        });
+                                                    }
+                                                }))
+                                                .child("↺")
+                                        )
+                                        .child(
+                                            div()
+                                                .px_1()
+                                                .text_xs()
+                                                .text_color(theme.muted_foreground)
+                                                .hover(|s| s.bg(theme.muted).text_color(theme.foreground))
+                                                .rounded_sm()
+                                                .cursor_pointer()
+                                                .on_mouse_down(MouseButton::Left, cx.listener(|_, _, _, cx| {
+                                                    cx.stop_propagation();
+                                                    if cx.has_global::<crate::plugin_manager::PluginManagerGlobal>() {
+                                                        let pm = cx.global::<crate::plugin_manager::PluginManagerGlobal>().0.clone();
+                                                        pm.update(cx, |pm, _| {
+                                                            pm.dispatch_event(crate::plugin_manager::event::PluginEvent::CommandExecuted { command: "git.stage_all".to_string() });
+                                                        });
+                                                    }
+                                                }))
+                                                .child("+")
+                                        )
+                                )
+                            } else {
+                                None
+                            })
+                    )
+                    .child(
+                        div()
+                            .px_1p5()
+                            .py_0p5()
+                            .bg(theme.muted)
+                            .text_color(theme.foreground)
+                            .rounded_md()
+                            .text_xs()
+                            .child(format!("{}", count))
+                    )
             )
     }
 
-    /// Git ファイル行の描画
+    /// VSCode 完全準拠: Git ファイル行の一行描画 (ファイル名 + ディレクトリ(途切れ可) + 絶対に消えないバッジ/ボタン)
     fn render_git_file_row(node: &serde_json::Value, is_staged: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let name = node.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
         let dir = node.get("dir").and_then(|d| d.as_str()).unwrap_or("").to_string();
@@ -724,28 +809,30 @@ impl LeftSidebar {
                 }
             }))
             .child(
+                // 左側: ファイル名 + ディレクトリ（完全一行・ディレクトリは横幅が狭いとき末尾省略）
                 div()
-                    .flex()
-                    .gap_2()
-                    .items_center()
                     .flex_1()
+                    .min_w_0()
                     .overflow_hidden()
-                    .child(Icon::new(IconName::File).size(gpui::px(13.0)).text_color(status_color))
+                    .flex()
+                    .items_baseline()
+                    .gap_1p5()
                     .child(
                         div()
                             .text_xs()
+                            .font_weight(FontWeight::SEMIBOLD)
                             .text_color(status_color)
-                            .max_w(gpui::px(120.0))
-                            .overflow_hidden()
+                            .flex_shrink_0()
                             .child(name)
                     )
                     .children(if !dir.is_empty() {
                         Some(
                             div()
                                 .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .max_w(gpui::px(80.0))
+                                .text_color(cx.theme().muted_foreground.opacity(0.75))
                                 .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
                                 .child(dir)
                         )
                     } else {
@@ -753,7 +840,9 @@ impl LeftSidebar {
                     })
             )
             .child(
+                // 右側: ホバーアクション (+/- / ↺) + ステータスバッジ (flex_shrink_0 で絶対に押し出されない・消えない)
                 div()
+                    .flex_shrink_0()
                     .flex()
                     .gap_2()
                     .items_center()

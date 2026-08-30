@@ -17,6 +17,7 @@ impl StatusBar {
 
 impl Render for StatusBar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.profiler.start_render();
         let mut left_items = Vec::new();
         let mut right_items = Vec::new();
 

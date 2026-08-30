@@ -240,25 +240,72 @@ impl Workspace {
                 self.schedule_save(cx);
                 cx.notify();
             }
-            PluginAction::OpenFileFinder => {
-                let root = self.root_path.clone();
-                self.command_palette.update(cx, |cp, cx| {
-                    cp.open_file_search(root.as_deref(), cx);
-                });
+            PluginAction::OpenFilePicker => {
+                if let Some(path) = rfd::FileDialog::new().pick_file() {
+                    let path_str = path.to_string_lossy().to_string();
+                    let title = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        self.editor_area.update(cx, |editor, cx| {
+                            editor.open_tab(path_str, title, content, cx);
+                        });
+                    }
+                }
             }
-            PluginAction::OpenCommandPalette => {
-                self.command_palette.update(cx, |cp, cx| {
-                    cp.open_command_palette(cx);
-                });
+            PluginAction::OpenFolderPicker => {
+                if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                    self.root_path = Some(folder.clone());
+                    self.left_sidebar.update(cx, |ls, cx| {
+                        ls.set_root(Some(folder), cx);
+                    });
+                    cx.notify();
+                }
             }
-            PluginAction::OpenKeybindings => {
+            PluginAction::CloseActiveTab => {
                 self.editor_area.update(cx, |ea, cx| {
-                    ea.open_keybindings(cx);
+                    if !ea.tabs.is_empty() {
+                        ea.close_tab(ea.active_tab, cx);
+                    }
                 });
             }
-            PluginAction::OpenSettings => {
+            PluginAction::SaveAsActiveTab => {
+                if let Some(file) = rfd::FileDialog::new().save_file() {
+                    let path_str = file.to_string_lossy().to_string();
+                    let title = file.file_name().unwrap_or_default().to_string_lossy().to_string();
+                    self.editor_area.update(cx, |ea, cx| {
+                        if let Some(tab) = ea.tabs.get_mut(ea.active_tab) {
+                            if let Some(editor) = tab.editor.as_ref() {
+                                editor.update(cx, |ed, cx| {
+                                    ed.file_path = Some(file.clone());
+                                    let _ = ed.save(cx);
+                                });
+                                tab.path = path_str;
+                                tab.title = title;
+                                cx.notify();
+                            }
+                        }
+                    });
+                }
+            }
+            PluginAction::EditorFind => {
                 self.editor_area.update(cx, |ea, cx| {
-                    ea.open_settings(cx);
+                    ea.find_replace.is_open = true;
+                    ea.find_replace.query.clear();
+                    cx.notify();
+                });
+            }
+            PluginAction::EditorReplace => {
+                self.editor_area.update(cx, |ea, cx| {
+                    ea.find_replace.is_open = true;
+                    ea.find_replace.is_replace_open = true;
+                    cx.notify();
+                });
+            }
+            PluginAction::OpenDocumentation => {
+                let doc_path = "docs/SDK_GUIDE.md".to_string();
+                let title = "SDK_GUIDE.md".to_string();
+                let content = std::fs::read_to_string(&doc_path).unwrap_or_else(|_| "# Nucleus SDK Guide".to_string());
+                self.editor_area.update(cx, |ea, cx| {
+                    ea.open_tab(doc_path, title, content, cx);
                 });
             }
             _ => {}

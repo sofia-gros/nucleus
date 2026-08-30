@@ -273,6 +273,18 @@ pub extern "C" fn on_event(ptr: i32, len: i32) {
                 invoke("process.exec", &restore_cmd);
                 refresh_git_status();
             }
+        } else if json_str.contains("git.stage_all") {
+            let add_all_cmd = format!(r#"{{"command": "git", "args": ["add", "-A"]{}}}"#, cwd_arg);
+            invoke("process.exec", &add_all_cmd);
+            refresh_git_status();
+        } else if json_str.contains("git.unstage_all") {
+            let unstage_all_cmd = format!(r#"{{"command": "git", "args": ["restore", "--staged", "."]{}}}"#, cwd_arg);
+            invoke("process.exec", &unstage_all_cmd);
+            refresh_git_status();
+        } else if json_str.contains("git.discard_all") {
+            let discard_all_cmd = format!(r#"{{"command": "git", "args": ["restore", "."]{}}}"#, cwd_arg);
+            invoke("process.exec", &discard_all_cmd);
+            refresh_git_status();
         } else if json_str.contains("git.commit") {
             log("Executing git commit...");
             let commit_cmd = format!(r#"{{"command": "git", "args": ["commit", "-m", "Commit from Nucleus"]{}}}"#, cwd_arg);

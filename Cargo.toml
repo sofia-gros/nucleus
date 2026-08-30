@@ -34,6 +34,7 @@ syntect = "5.2.0"
 ropey = "1.6"
 portable-pty = "0.8"
 notify = "7.0"
+rfd = "0.15"
 
 [dev-dependencies]
 criterion = "0.5"

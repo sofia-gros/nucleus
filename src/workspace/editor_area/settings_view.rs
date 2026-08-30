@@ -149,7 +149,7 @@ impl Render for SettingsView {
         }).collect();
 
         let total_items = filtered_items.len();
-        let page_capacity = 12;
+        let page_capacity = 20;
         let max_scroll = total_items.saturating_sub(page_capacity);
         let effective_scroll = self.scroll_offset.min(max_scroll);
         let visible_items = if total_items > 0 {
@@ -161,6 +161,7 @@ impl Render for SettingsView {
 
         let mut settings_list = div()
             .flex_1()
+            .min_w_0()
             .h_full()
             .flex()
             .flex_col()

@@ -47,39 +47,54 @@ impl TerminalSession {
 
         // バックグラウンドスレッドで PTY 出力を継続読み取り
         thread::spawn(move || {
-            let mut buf = [0u8; 1024];
-            let mut line_buffer = String::new();
+            let mut buf = [0u8; 4096];
+            let mut current_line = String::new();
 
             while let Ok(n) = reader.read(&mut buf) {
                 if n == 0 {
                     break;
                 }
-                let s = String::from_utf8_lossy(&buf[..n]);
-                for ch in s.chars() {
-                    if ch == '\n' {
-                        let clean_line = Self::strip_ansi_codes(&line_buffer);
+                let raw_text = String::from_utf8_lossy(&buf[..n]);
+                let clean_text = Self::strip_ansi_codes(&raw_text);
+                let mut chars = clean_text.chars().peekable();
+
+                while let Some(ch) = chars.next() {
+                    if ch == '\r' {
+                        if chars.peek() == Some(&'\n') {
+                            chars.next(); // '\n' を消費して CRLF 確定
+                            if let Ok(mut lines) = output_lines_clone.write() {
+                                lines.push(current_line.clone());
+                                if lines.len() > 2000 {
+                                    lines.remove(0);
+                                }
+                            }
+                            current_line.clear();
+                        } else {
+                            // 単独の CR（行頭復帰）
+                            current_line.clear();
+                        }
+                    } else if ch == '\n' {
+                        // 単独の LF
                         if let Ok(mut lines) = output_lines_clone.write() {
-                            lines.push(clean_line);
-                            // 最大保持行数制限
-                            if lines.len() > 1000 {
+                            lines.push(current_line.clone());
+                            if lines.len() > 2000 {
                                 lines.remove(0);
                             }
                         }
-                        line_buffer.clear();
-                    } else if ch == '\r' {
-                        // CR は無視
-                    } else {
-                        line_buffer.push(ch);
+                        current_line.clear();
+                    } else if ch != '\0' {
+                        current_line.push(ch);
                     }
                 }
-                if !line_buffer.is_empty() {
-                    let clean_line = Self::strip_ansi_codes(&line_buffer);
+
+                // 未改行のプロンプト行（例: "PS C:\Project\nucleus> "）を即座にUIへ反映
+                if !current_line.is_empty() {
                     if let Ok(mut lines) = output_lines_clone.write() {
                         if lines.is_empty() {
-                            lines.push(clean_line);
+                            lines.push(current_line.clone());
                         } else {
                             let last = lines.last_mut().unwrap();
-                            *last = clean_line;
+                            *last = current_line.clone();
                         }
                     }
                 }
@@ -132,17 +147,35 @@ impl TerminalSession {
         }
     }
 
-    /// ANSI エスケープコードの簡易除去
-    fn strip_ansi_codes(input: &str) -> String {
+    /// ANSI エスケープコード・OSC・VT100 制御シーケンスの完全除去
+    pub fn strip_ansi_codes(input: &str) -> String {
         let mut result = String::with_capacity(input.len());
-        let mut in_escape = false;
+        let mut chars = input.chars().peekable();
 
-        for ch in input.chars() {
+        while let Some(ch) = chars.next() {
             if ch == '\x1B' {
-                in_escape = true;
-            } else if in_escape {
-                if (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || ch == '~' {
-                    in_escape = false;
+                // ESC シーケンスの開始
+                if let Some(&next_ch) = chars.peek() {
+                    if next_ch == '[' {
+                        chars.next(); // '[' を消費
+                        // CSI シーケンス: 終端文字 (0x40..=0x7E) が来るまでスキップ
+                        while let Some(&c) = chars.peek() {
+                            chars.next();
+                            if c >= '@' && c <= '~' {
+                                break;
+                            }
+                        }
+                    } else if next_ch == ']' {
+                        chars.next(); // ']' を消費
+                        // OSC シーケンス: BEL (\x07) または ST (\x1b\) が来るまでスキップ
+                        while let Some(c) = chars.next() {
+                            if c == '\x07' || c == '\x1B' {
+                                break;
+                            }
+                        }
+                    } else {
+                        chars.next();
+                    }
                 }
             } else {
                 result.push(ch);
