@@ -6,10 +6,12 @@
 
 *Core層はシンプルに、爆速に。機能はプラグインで無限に拡張可能ーーNucleus Editor*
 
+[![Version](https://img.shields.io/badge/Release-v1.0.0--alpha-blue.svg?style=flat-square)](https://github.com/sofia-gros/nucleus/releases)
+[![CI](https://github.com/sofia-gros/nucleus/actions/workflows/ci.yml/badge.svg)](https://github.com/sofia-gros/nucleus/actions/workflows/ci.yml)
 [![Rust Edition 2024](https://img.shields.io/badge/Rust-2024_Edition-orange.svg?style=flat-square&logo=rust)](https://www.rust-lang.org/)
 [![UI GPUI](https://img.shields.io/badge/UI-GPUI_%2B_gpui--component-blue.svg?style=flat-square)](https://github.com/zed-industries/zed)
 [![Plugin Wasmtime](https://img.shields.io/badge/Plugin-Wasmtime_WASM-purple.svg?style=flat-square)](https://wasmtime.dev/)
-[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg?style=flat-square)](#)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg?style=flat-square)](#)
 [![License](https://img.shields.io/badge/License-MIT%20%2F%20Apache--2.0-green.svg?style=flat-square)](#)
 
 <br/>
@@ -85,8 +87,13 @@ Nucleus (Host)
 ## 🚀 クイックスタート (Getting Started)
 
 ### 前提条件 (Prerequisites)
-- [Rust](https://www.rust-lang.org/tools/install) (最新の stable または nightly)
-- C++ ビルドツール（Windows: Visual Studio C++ Build Tools、Linux: `build-essential`, `libx11-dev` 等）
+- [Rust](https://www.rust-lang.org/tools/install) (最新の stable)
+- **Windows**: Visual Studio C++ Build Tools
+- **macOS**: Xcode Command Line Tools (`xcode-select --install`)
+- **Linux (Ubuntu / Debian)**:
+  ```bash
+  sudo apt-get install -y pkg-config libxkbcommon-dev libx11-dev libwayland-dev libfontconfig1-dev libasound2-dev libssl-dev
+  ```
 
 ### 1. リポジトリのクローン & ビルド
 ```bash

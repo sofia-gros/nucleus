@@ -1,6 +1,6 @@
 [package]
 name = "nucleus-plugin-sdk"
-version = "0.1.0"
+version = "1.0.0-alpha.1"
 edition = "2021"
 description = "Official Rust SDK for Nucleus IDE WASM Plugins"
 authors = ["Nucleus Team"]
