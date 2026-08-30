@@ -1,0 +1,11 @@
+[package]
+name = "material_icons"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+nucleus_plugin_sdk = { path = "../../crates/nucleus-plugin-sdk" }
+serde_json = "1.0"

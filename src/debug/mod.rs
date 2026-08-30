@@ -2,6 +2,7 @@
 
 pub mod protocol;
 pub mod client;
+pub mod profiler;
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};

@@ -238,6 +238,22 @@ fn spawn_plugin_event_loop(
                             });
                         });
                     }
+                    plugin_manager::action::PluginAction::RegisterIconRules { rules } => {
+                        let _ = app_cx.update(|cx| {
+                            pm_model.update(cx, |pm, cx| {
+                                pm.ui_registry.register_icon_rules(rules);
+                                cx.notify();
+                            });
+                        });
+                    }
+                    plugin_manager::action::PluginAction::RegisterTranslations { dict } => {
+                        let _ = app_cx.update(|cx| {
+                            pm_model.update(cx, |pm, cx| {
+                                pm.ui_registry.register_translations(dict);
+                                cx.notify();
+                            });
+                        });
+                    }
                     _ => {
                         let _ = app_cx.update(|cx| {
                             view_clone.update(cx, |workspace, cx| {

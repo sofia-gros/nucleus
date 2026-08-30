@@ -1,0 +1,12 @@
+[plugin]
+id = "japanese_language"
+name = "Japanese Language Pack"
+version = "0.1.0"
+description = "日本語言語パック（UI全体の完全日本語化）"
+author = "Nucleus Team"
+
+[runtime]
+wasm = "japanese_language.wasm"
+
+[permissions]
+ui = ["register_translations"]

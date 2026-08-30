@@ -23,6 +23,7 @@ pub struct BottomPanel {
     pub problems: Vec<ProblemItem>,
     pub input_buffer: String,
     pub focus_handle: FocusHandle,
+    pub scroll_offset: usize,
 }
 
 impl BottomPanel {
@@ -35,6 +36,7 @@ impl BottomPanel {
             problems: Vec::new(),
             input_buffer: String::new(),
             focus_handle: cx.focus_handle(),
+            scroll_offset: 0,
         };
 
         if let Ok(session) = TerminalSession::new("term-1".to_string(), "pwsh".to_string(), None) {
@@ -215,7 +217,20 @@ impl Render for BottomPanel {
         // メインコンテンツ
         let content = if is_terminal {
             if let Some(session) = self.sessions.get(self.active_session) {
-                let lines = session.output_lines.read().unwrap().clone();
+                let lines_guard = session.output_lines.read().unwrap();
+                let total_lines = lines_guard.len();
+                let capacity = 35;
+                let max_offset = total_lines.saturating_sub(capacity);
+                let effective_offset = self.scroll_offset.min(max_offset);
+                let end = total_lines.saturating_sub(effective_offset);
+                let start = end.saturating_sub(capacity);
+                let visible_lines: Vec<String> = if total_lines > 0 {
+                    lines_guard[start..end].iter().cloned().collect()
+                } else {
+                    Vec::new()
+                };
+                drop(lines_guard);
+
                 let mut term_output = div()
                     .flex_1()
                     .p_3()
@@ -224,9 +239,21 @@ impl Render for BottomPanel {
                     .flex()
                     .flex_col()
                     .overflow_hidden()
-                    .bg(cx.theme().background);
+                    .bg(cx.theme().background)
+                    .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _, cx| {
+                        let delta = match event.delta {
+                            ScrollDelta::Pixels(p) => (f32::from(p.y) / 20.0).round() as i32,
+                            ScrollDelta::Lines(l) => l.y.round() as i32,
+                        };
+                        if delta > 0 {
+                            this.scroll_offset = this.scroll_offset.saturating_add(delta as usize);
+                        } else if delta < 0 {
+                            this.scroll_offset = this.scroll_offset.saturating_sub((-delta) as usize);
+                        }
+                        cx.notify();
+                    }));
 
-                for line in lines.iter().rev().take(30).collect::<Vec<_>>().into_iter().rev() {
+                for line in visible_lines {
                     term_output = term_output.child(
                         div().text_color(cx.theme().foreground).child(line.clone())
                     );

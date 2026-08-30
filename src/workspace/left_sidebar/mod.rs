@@ -5,9 +5,24 @@ use gpui_component::*;
 use gpui_component::tree::{tree, TreeState, TreeItem};
 use gpui_component::list::ListItem;
 use gpui_component::theme::ActiveTheme;
+use std::sync::Arc;
 use std::path::{Path, PathBuf};
 use crate::file_system::FileEntry;
 use crate::search::{search_in_project, replace_in_file, SearchResult};
+
+fn hex_to_color(hex: &str) -> gpui::Hsla {
+    let clean = hex.trim_start_matches('#');
+    if clean.len() >= 6 {
+        if let (Ok(r), Ok(g), Ok(b)) = (
+            u8::from_str_radix(&clean[0..2], 16),
+            u8::from_str_radix(&clean[2..4], 16),
+            u8::from_str_radix(&clean[4..6], 16),
+        ) {
+            return gpui::rgb(((r as u32) << 16) | ((g as u32) << 8) | (b as u32)).into();
+        }
+    }
+    gpui::rgb(0xcccccc).into()
+}
 
 pub struct LeftSidebar {
     root_path: Option<PathBuf>,
@@ -110,54 +125,46 @@ impl LeftSidebar {
 
 impl Render for LeftSidebar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let git_status_map = Arc::new(Self::build_git_status_map(cx));
+
         let list = if let Some(tree_state) = &self.tree_state {
             tree(
                 tree_state,
                 {
-                    let raw_entries = self.raw_entries.clone();
+                    let status_map = git_status_map.clone();
                     move |_ix, entry: &gpui_component::tree::TreeEntry, _selected, _window, cx| {
                         let item = entry.item();
                         let path_str = item.id.to_string();
-                        let is_folder = !item.children.is_empty() || Path::new(&path_str).is_dir();
-                        let icon_name = if is_folder {
-                            if item.is_expanded() {
-                                IconName::FolderOpen
-                            } else {
-                                IconName::Folder
-                            }
+                        let is_folder = !item.children.is_empty();
+                        let (icon_text, icon_color_val, status_badge_opt, status_color_val) = if cx.has_global::<crate::plugin_manager::PluginManagerGlobal>() {
+                            let pm_global = cx.global::<crate::plugin_manager::PluginManagerGlobal>().0.clone();
+                            let pm = pm_global.read(cx);
+                            let deco = pm.ui_registry.merge_file_decorations(&path_str, is_folder, &status_map);
+                            (
+                                deco.icon_text.unwrap_or_else(|| if is_folder { "📁".to_string() } else { "📄".to_string() }),
+                                deco.icon_color.unwrap_or_else(|| "#cccccc".to_string()),
+                                deco.status_badge,
+                                deco.status_color.unwrap_or_else(|| "#888888".to_string()),
+                            )
                         } else {
-                            IconName::File
+                            let git_status = Self::lookup_git_status_from_map(&status_map, &path_str, is_folder);
+                            (
+                                if is_folder { "📁".to_string() } else { "📄".to_string() },
+                                "#cccccc".to_string(),
+                                git_status,
+                                "#eab308".to_string(),
+                            )
                         };
 
-                        let git_status = Self::lookup_git_status(&raw_entries, &path_str, cx);
-
-                        let (file_color, status_badge): (gpui::Hsla, Option<Div>) = match git_status.as_deref() {
-                            Some("M") | Some("MM") => (
-                                gpui::rgb(0xeab308).into(),
-                                if is_folder {
-                                    Some(div().text_xs().text_color(gpui::rgb(0xeab308)).child("●"))
-                                } else {
-                                    Some(div().text_xs().font_weight(FontWeight::BOLD).text_color(gpui::rgb(0xeab308)).child("M"))
-                                }
-                            ),
-                            Some("U") | Some("??") | Some("A") => (
-                                gpui::rgb(0x22c55e).into(),
-                                if is_folder {
-                                    Some(div().text_xs().text_color(gpui::rgb(0x22c55e)).child("●"))
-                                } else {
-                                    Some(div().text_xs().font_weight(FontWeight::BOLD).text_color(gpui::rgb(0x22c55e)).child("U"))
-                                }
-                            ),
-                            Some("D") => (
-                                gpui::rgb(0xef4444).into(),
-                                if is_folder {
-                                    Some(div().text_xs().text_color(gpui::rgb(0xef4444)).child("●"))
-                                } else {
-                                    Some(div().text_xs().font_weight(FontWeight::BOLD).text_color(gpui::rgb(0xef4444)).child("D"))
-                                }
-                            ),
-                            _ => (cx.theme().foreground, None),
-                        };
+                        let status_badge: Option<Div> = status_badge_opt.map(|badge| {
+                            let is_dot = badge == "●";
+                            let color = hex_to_color(&status_color_val);
+                            div()
+                                .text_xs()
+                                .font_weight(if is_dot { FontWeight::NORMAL } else { FontWeight::BOLD })
+                                .text_color(color)
+                                .child(badge)
+                        });
 
                         let mut list_item = ListItem::new(item.id.clone())
                             .child(
@@ -172,8 +179,8 @@ impl Render for LeftSidebar {
                                             .flex()
                                             .items_center()
                                             .gap_1p5()
-                                            .child(Icon::new(icon_name).size(gpui::px(14.0)).text_color(if is_folder { cx.theme().muted_foreground } else { file_color }))
-                                            .child(div().text_xs().text_color(file_color).child(item.label.clone()))
+                                            .child(div().text_xs().text_color(hex_to_color(&icon_color_val)).child(icon_text))
+                                            .child(div().text_xs().text_color(cx.theme().foreground).child(item.label.clone()))
                                     )
                                     .children(status_badge)
                             );
@@ -811,75 +818,80 @@ impl LeftSidebar {
             )
     }
 
-    fn lookup_git_status(_entries: &Option<Vec<FileEntry>>, path_str: &str, cx: &App) -> Option<String> {
+    /// Git ステータスを一括で HashMap にキャッシュ構築 (O(N))
+    fn build_git_status_map(cx: &App) -> std::collections::HashMap<String, String> {
+        let mut map_res = std::collections::HashMap::new();
         if !cx.has_global::<crate::plugin_manager::PluginManagerGlobal>() {
-            return None;
+            return map_res;
         }
         let pm = cx.global::<crate::plugin_manager::PluginManagerGlobal>().0.clone();
         let pm = pm.read(cx);
-        let git_panel = pm.ui_registry.sidebar_items.iter().find(|i| i.id == "git_sidebar")?;
-        
-        let path = Path::new(path_str);
-        let is_dir = path.is_dir();
+        let Some(git_panel) = pm.ui_registry.sidebar_items.iter().find(|i| i.id == "git_sidebar") else {
+            return map_res;
+        };
+
+        let mut insert_nodes = |nodes: &Vec<serde_json::Value>| {
+            for node in nodes {
+                if let (Some(path), Some(status)) = (node.get("path").and_then(|p| p.as_str()), node.get("status").and_then(|s| s.as_str())) {
+                    let norm = path.replace('\\', "/");
+                    map_res.insert(norm, status.to_string());
+                }
+            }
+        };
+
+        if let serde_json::Value::Object(map) = &git_panel.ui_ast {
+            if let Some(staged) = map.get("staged_nodes").and_then(|n| n.as_array()) {
+                insert_nodes(staged);
+            }
+            if let Some(changes) = map.get("changes_nodes").and_then(|n| n.as_array()).or_else(|| map.get("nodes").and_then(|n| n.as_array())) {
+                insert_nodes(changes);
+            }
+        }
+
+        map_res
+    }
+
+    /// キャッシュされたマップからの高速ステータス照合
+    fn lookup_git_status_from_map(
+        map: &std::collections::HashMap<String, String>,
+        path_str: &str,
+        is_dir: bool,
+    ) -> Option<String> {
         let norm_path_str = path_str.replace('\\', "/");
 
-        let check_node = |nodes: &Vec<serde_json::Value>| -> Option<String> {
-            for node in nodes {
-                if let Some(node_path) = node.get("path").and_then(|p| p.as_str()) {
-                    let norm_node_path = node_path.replace('\\', "/");
-                    let status = node.get("status").and_then(|s| s.as_str()).map(|s| s.to_string());
-
-                    if is_dir {
-                        let trimmed_file = norm_path_str.trim_end_matches('/');
-                        let trimmed_git = norm_node_path.trim_start_matches('/');
-
-                        if trimmed_git.starts_with(trimmed_file) {
-                            return Some("M".to_string());
-                        }
-                        for part in trimmed_file.split('/') {
-                            if !part.is_empty() && !part.ends_with(':') {
-                                if let Some(pos) = trimmed_file.rfind(part) {
-                                    let suffix = &trimmed_file[pos..];
-                                    if trimmed_git.starts_with(&format!("{}/", suffix)) {
-                                        return Some("M".to_string());
-                                    }
-                                }
+        if !is_dir {
+            // 1. 完全一致
+            if let Some(status) = map.get(&norm_path_str) {
+                return Some(status.clone());
+            }
+            // 2. 末尾サフィックス一致 (絶対パス vs 相対パス)
+            for (node_path, status) in map {
+                if norm_path_str.ends_with(&format!("/{}", node_path.trim_start_matches('/')))
+                    || node_path.ends_with(&format!("/{}", norm_path_str.trim_start_matches('/')))
+                {
+                    return Some(status.clone());
+                }
+            }
+            None
+        } else {
+            let trimmed_file = norm_path_str.trim_end_matches('/');
+            for (node_path, _) in map {
+                let trimmed_git = node_path.trim_start_matches('/');
+                if trimmed_git.starts_with(trimmed_file) {
+                    return Some("M".to_string());
+                }
+                for part in trimmed_file.split('/') {
+                    if !part.is_empty() && !part.ends_with(':') {
+                        if let Some(pos) = trimmed_file.rfind(part) {
+                            let suffix = &trimmed_file[pos..];
+                            if trimmed_git.starts_with(&format!("{}/", suffix)) {
+                                return Some("M".to_string());
                             }
-                        }
-                    } else {
-                        // 1. 完全一致
-                        if norm_node_path == norm_path_str {
-                            return status;
-                        }
-                        // 2. 末尾サフィックス一致 (絶対パス vs 相対パス)
-                        if norm_path_str.ends_with(&format!("/{}", norm_node_path.trim_start_matches('/')))
-                            || norm_node_path.ends_with(&format!("/{}", norm_path_str.trim_start_matches('/')))
-                        {
-                            return status;
-                        }
-                        // 3. ルートなし一致
-                        if norm_path_str.trim_start_matches("./") == norm_node_path.trim_start_matches("./") {
-                            return status;
                         }
                     }
                 }
             }
             None
-        };
-
-        if let serde_json::Value::Object(map) = &git_panel.ui_ast {
-            if let Some(staged) = map.get("staged_nodes").and_then(|n| n.as_array()) {
-                if let Some(s) = check_node(staged) {
-                    return Some(s);
-                }
-            }
-            if let Some(changes) = map.get("changes_nodes").and_then(|n| n.as_array()).or_else(|| map.get("nodes").and_then(|n| n.as_array())) {
-                if let Some(s) = check_node(changes) {
-                    return Some(s);
-                }
-            }
         }
-
-        None
     }
 }

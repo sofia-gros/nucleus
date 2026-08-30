@@ -34,4 +34,6 @@ pub enum PluginAction {
     OpenCommandPalette,
     OpenKeybindings,
     OpenSettings,
+    RegisterIconRules { rules: std::collections::HashMap<String, (String, String)> },
+    RegisterTranslations { dict: std::collections::HashMap<String, String> },
 }

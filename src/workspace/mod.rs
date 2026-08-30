@@ -71,6 +71,26 @@ impl Workspace {
             None
         };
         
+        // 定期的なファイル変更ポーリングのバックグラウンドタスク起動 (500msデバウンス)
+        if watcher.is_some() {
+            let executor = cx.background_executor().clone();
+            cx.spawn(|this_weak: WeakEntity<Self>, async_cx: &mut gpui::AsyncApp| {
+                let async_cx = async_cx.clone();
+                async move {
+                    loop {
+                        executor.timer(std::time::Duration::from_millis(500)).await;
+                        let _ = async_cx.update(|cx| {
+                            if let Some(entity) = this_weak.upgrade() {
+                                entity.update(cx, |workspace, cx| {
+                                    workspace.poll_file_watcher(cx);
+                                });
+                            }
+                        });
+                    }
+                }
+            }).detach();
+        }
+
         Self {
             focus_handle: cx.focus_handle(),
             title_bar: cx.new(|_| TitleBar::new()),
@@ -320,8 +340,6 @@ impl Workspace {
 
 impl Render for Workspace {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.poll_file_watcher(cx);
-
         let root_path_ref = self.root_path.clone();
 
         div()

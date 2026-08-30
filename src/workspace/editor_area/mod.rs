@@ -87,6 +87,7 @@ pub struct EditorArea {
     /// クイックフィックスポップアップ状態
     pub quick_fix_state: QuickFixState,
     pub focus_handle: FocusHandle,
+    pub tabs_scroll_offset: usize,
 }
 
 impl EditorArea {
@@ -105,6 +106,7 @@ impl EditorArea {
             rename_state: None,
             quick_fix_state: QuickFixState::default(),
             focus_handle: cx.focus_handle(),
+            tabs_scroll_offset: 0,
         }
     }
 
@@ -638,17 +640,32 @@ impl Render for EditorArea {
         }
 
         // カスタムファイルタブバーの構築（横スクロール・省略表示対応）
+        let total_tabs = self.tabs.len();
+        let scroll_offset = self.tabs_scroll_offset.min(total_tabs.saturating_sub(1));
+
         let mut tabs_row = div()
             .flex()
             .flex_row()
             .items_center()
             .h_full()
             .flex_1()
-            .overflow_x_hidden();
+            .overflow_x_hidden()
+            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _, cx| {
+                let delta = match event.delta {
+                    ScrollDelta::Pixels(p) => (f32::from(p.y) / 20.0).round() as i32,
+                    ScrollDelta::Lines(l) => l.y.round() as i32,
+                };
+                if delta > 0 {
+                    this.tabs_scroll_offset = this.tabs_scroll_offset.saturating_add(1).min(this.tabs.len().saturating_sub(1));
+                } else if delta < 0 {
+                    this.tabs_scroll_offset = this.tabs_scroll_offset.saturating_sub(1);
+                }
+                cx.notify();
+            }));
 
         let active_tab_idx = self.active_tab;
 
-        for (idx, tab) in self.tabs.iter().enumerate() {
+        for (idx, tab) in self.tabs.iter().enumerate().skip(scroll_offset) {
             let is_active = idx == active_tab_idx;
             let is_dirty = tab.editor.as_ref().map(|e| e.read(cx).is_dirty(cx)).unwrap_or(false);
             let is_settings = tab.settings_view.is_some();

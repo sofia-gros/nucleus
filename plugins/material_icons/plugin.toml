@@ -1,0 +1,12 @@
+[plugin]
+id = "material_icons"
+name = "Material Icon Theme"
+version = "0.1.0"
+description = "File and folder icons for Nucleus Editor"
+author = "Nucleus Team"
+
+[runtime]
+wasm = "material_icons.wasm"
+
+[permissions]
+ui = ["register_icon_rules"]

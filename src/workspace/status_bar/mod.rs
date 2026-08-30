@@ -3,11 +3,15 @@
 use gpui::*;
 use gpui_component::theme::ActiveTheme;
 
-pub struct StatusBar;
+pub struct StatusBar {
+    pub profiler: crate::debug::profiler::FrameProfiler,
+}
 
 impl StatusBar {
     pub fn new() -> Self {
-        Self
+        Self {
+            profiler: crate::debug::profiler::FrameProfiler::new(),
+        }
     }
 }
 
@@ -50,6 +54,9 @@ impl Render for StatusBar {
                 }
             }
         }
+
+        self.profiler.mark_frame();
+        let hud_text = self.profiler.hud_label();
 
         div()
             .w_full()
@@ -102,9 +109,10 @@ impl Render for StatusBar {
                             .child("LF")
                     )
                     .child(
-                        div().px_2().h_full().flex().items_center().text_color(cx.theme().muted_foreground)
-                            .hover(|s| s.bg(cx.theme().muted).text_color(cx.theme().foreground)).cursor_pointer()
-                            .child("{} JSON")
+                        div().px_2().h_full().flex().items_center().text_color(gpui::rgb(0x38bdf8))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .hover(|s| s.bg(cx.theme().muted)).cursor_pointer()
+                            .child(hud_text)
                     )
             )
     }

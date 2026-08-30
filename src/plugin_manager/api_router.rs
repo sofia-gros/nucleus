@@ -233,6 +233,34 @@ pub fn handle_invoke(
                 }
                 r#"{"status": "queued"}"#.to_string()
             }
+            "ui.register_icon_rules" => {
+                let mut rules = std::collections::HashMap::new();
+                if let Some(obj) = req["args"]["rules"].as_object() {
+                    for (k, v) in obj {
+                        if let (Some(icon), Some(color)) = (v["icon"].as_str(), v["color"].as_str()) {
+                            rules.insert(k.clone(), (icon.to_string(), color.to_string()));
+                        }
+                    }
+                }
+                if let Err(e) = action_tx.send(PluginAction::RegisterIconRules { rules }) {
+                    return format!(r#"{{"status": "error", "message": "Channel send failed: {}"}}"#, e);
+                }
+                r#"{"status": "ok"}"#.to_string()
+            }
+            "ui.register_translations" => {
+                let mut dict = std::collections::HashMap::new();
+                if let Some(obj) = req["args"]["dict"].as_object() {
+                    for (k, v) in obj {
+                        if let Some(val_str) = v.as_str() {
+                            dict.insert(k.clone(), val_str.to_string());
+                        }
+                    }
+                }
+                if let Err(e) = action_tx.send(PluginAction::RegisterTranslations { dict }) {
+                    return format!(r#"{{"status": "error", "message": "Channel send failed: {}"}}"#, e);
+                }
+                r#"{"status": "ok"}"#.to_string()
+            }
             _ => {
                 format!(r#"{{"status": "error", "message": "Unknown API: {}"}}"#, api)
             }
