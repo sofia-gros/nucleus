@@ -19,10 +19,11 @@ pub struct LeftSidebar {
     pub replace_query: String,
     pub search_results: Vec<SearchResult>,
     pub case_sensitive: bool,
+    pub focus_handle: FocusHandle,
 }
 
 impl LeftSidebar {
-    pub fn new(root_path: Option<PathBuf>) -> Self {
+    pub fn new(root_path: Option<PathBuf>, cx: &mut Context<Self>) -> Self {
         Self {
             root_path,
             tree_state: None,
@@ -33,6 +34,7 @@ impl LeftSidebar {
             replace_query: String::new(),
             search_results: Vec::new(),
             case_sensitive: false,
+            focus_handle: cx.focus_handle(),
         }
     }
 
@@ -295,15 +297,51 @@ impl Render for LeftSidebar {
                                                 .items_center()
                                                 .justify_between()
                                                 .overflow_hidden()
+                                                .track_focus(&self.focus_handle)
+                                                .cursor(CursorStyle::IBeam)
+                                                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
+                                                    this.focus_handle.focus(window, cx);
+                                                }))
+                                                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                                                    let key = &event.keystroke.key;
+                                                    if key == "enter" && event.keystroke.modifiers.control {
+                                                        let msg = if this.commit_message.is_empty() {
+                                                            "Update".to_string()
+                                                        } else {
+                                                            this.commit_message.clone()
+                                                        };
+                                                        if cx.has_global::<crate::plugin_manager::PluginManagerGlobal>() {
+                                                            let pm_global = cx.global::<crate::plugin_manager::PluginManagerGlobal>().0.clone();
+                                                            pm_global.update(cx, |pm, _| {
+                                                                pm.dispatch_event(crate::plugin_manager::event::PluginEvent::CommandExecuted {
+                                                                    command: format!("git.commit:{}", msg),
+                                                                });
+                                                            });
+                                                        }
+                                                        this.commit_message.clear();
+                                                        cx.notify();
+                                                    } else if key == "backspace" {
+                                                        this.commit_message.pop();
+                                                        cx.notify();
+                                                    } else if !event.keystroke.modifiers.control && !event.keystroke.modifiers.alt {
+                                                        if key.len() == 1 {
+                                                            this.commit_message.push_str(key);
+                                                            cx.notify();
+                                                        } else if key == "space" {
+                                                            this.commit_message.push(' ');
+                                                            cx.notify();
+                                                        }
+                                                    }
+                                                }))
                                                 .child(
                                                     div()
                                                         .text_xs()
-                                                        .text_color(cx.theme().muted_foreground)
+                                                        .text_color(if self.commit_message.is_empty() { cx.theme().muted_foreground } else { cx.theme().foreground })
                                                         .overflow_hidden()
                                                         .child(if self.commit_message.is_empty() {
-                                                            "Message (Ctrl+Enter to commit)".to_string()
+                                                            "Message (Ctrl+Enter to commit)...".to_string()
                                                         } else {
-                                                            self.commit_message.clone()
+                                                            format!("{}_", self.commit_message)
                                                         })
                                                 )
                                         ).child(
@@ -540,9 +578,31 @@ impl LeftSidebar {
                             .flex()
                             .items_center()
                             .justify_between()
+                            .track_focus(&self.focus_handle)
+                            .cursor(CursorStyle::IBeam)
+                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
+                                this.focus_handle.focus(window, cx);
+                            }))
+                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                                let key = &event.keystroke.key;
+                                if key == "enter" {
+                                    this.execute_search(cx);
+                                } else if key == "backspace" {
+                                    this.search_query.pop();
+                                    cx.notify();
+                                } else if !event.keystroke.modifiers.control && !event.keystroke.modifiers.alt {
+                                    if key.len() == 1 {
+                                        this.search_query.push_str(key);
+                                        cx.notify();
+                                    } else if key == "space" {
+                                        this.search_query.push(' ');
+                                        cx.notify();
+                                    }
+                                }
+                            }))
                             .child(
                                 div().text_xs().text_color(if self.search_query.is_empty() { theme.muted_foreground } else { theme.foreground })
-                                    .child(if self.search_query.is_empty() { "Search (click Find)...".to_string() } else { self.search_query.clone() })
+                                    .child(if self.search_query.is_empty() { "Search (type and press Enter)...".to_string() } else { format!("{}_", self.search_query) })
                             )
                             .child(
                                 div()
@@ -563,7 +623,13 @@ impl LeftSidebar {
                             )
                     )
                     .child(
-                        div().px_2().py_1p5().bg(theme.muted.opacity(0.3)).border_1().border_color(theme.border).rounded_md()
+                        div()
+                            .px_2()
+                            .py_1p5()
+                            .bg(theme.muted.opacity(0.3))
+                            .border_1()
+                            .border_color(theme.border)
+                            .rounded_md()
                             .child(div().text_xs().text_color(if self.replace_query.is_empty() { theme.muted_foreground } else { theme.foreground })
                                 .child(if self.replace_query.is_empty() { "Replace...".to_string() } else { self.replace_query.clone() }))
                     )
@@ -761,13 +827,39 @@ impl LeftSidebar {
             for node in nodes {
                 if let Some(node_path) = node.get("path").and_then(|p| p.as_str()) {
                     let norm_node_path = node_path.replace('\\', "/");
-                    if !is_dir {
-                        if norm_node_path == norm_path_str {
-                            return node.get("status").and_then(|s| s.as_str()).map(|s| s.to_string());
+                    let status = node.get("status").and_then(|s| s.as_str()).map(|s| s.to_string());
+
+                    if is_dir {
+                        let trimmed_file = norm_path_str.trim_end_matches('/');
+                        let trimmed_git = norm_node_path.trim_start_matches('/');
+
+                        if trimmed_git.starts_with(trimmed_file) {
+                            return Some("M".to_string());
+                        }
+                        for part in trimmed_file.split('/') {
+                            if !part.is_empty() && !part.ends_with(':') {
+                                if let Some(pos) = trimmed_file.rfind(part) {
+                                    let suffix = &trimmed_file[pos..];
+                                    if trimmed_git.starts_with(&format!("{}/", suffix)) {
+                                        return Some("M".to_string());
+                                    }
+                                }
+                            }
                         }
                     } else {
-                        if norm_node_path.starts_with(&format!("{}/", norm_path_str)) {
-                            return Some("M".to_string());
+                        // 1. 完全一致
+                        if norm_node_path == norm_path_str {
+                            return status;
+                        }
+                        // 2. 末尾サフィックス一致 (絶対パス vs 相対パス)
+                        if norm_path_str.ends_with(&format!("/{}", norm_node_path.trim_start_matches('/')))
+                            || norm_node_path.ends_with(&format!("/{}", norm_path_str.trim_start_matches('/')))
+                        {
+                            return status;
+                        }
+                        // 3. ルートなし一致
+                        if norm_path_str.trim_start_matches("./") == norm_node_path.trim_start_matches("./") {
+                            return status;
                         }
                     }
                 }

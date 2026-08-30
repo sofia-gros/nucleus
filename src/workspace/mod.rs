@@ -56,8 +56,7 @@ pub struct Workspace {
 impl Workspace {
     pub fn new(root_path: Option<PathBuf>, cx: &mut Context<Self>) -> Self {
         let state = Self::load_state();
-        let left_sidebar = LeftSidebar::new(root_path.clone());
-        let left_sidebar_entity = cx.new(|_| left_sidebar);
+        let left_sidebar_entity = cx.new(|cx| LeftSidebar::new(root_path.clone(), cx));
         
         if let Some(p) = &root_path {
             left_sidebar_entity.update(cx, |sidebar, cx| {
@@ -80,7 +79,7 @@ impl Workspace {
             left_sidebar: left_sidebar_entity,
             right_sidebar: cx.new(|_| RightSidebar::new()),
             bottom_panel: cx.new(|cx| BottomPanel::new(cx)),
-            editor_area: cx.new(|_| EditorArea::new()),
+            editor_area: cx.new(|cx| EditorArea::new(cx)),
             command_palette: cx.new(|cx| CommandPalette::new(cx)),
             file_watcher: watcher,
             root_path,
@@ -377,15 +376,17 @@ impl Render for Workspace {
                 workspace.schedule_save(cx);
                 cx.notify();
             }))
-            .on_action(cx.listener(move |workspace, _: &OpenFileFinder, _window, cx| {
+            .on_action(cx.listener(move |workspace, _: &OpenFileFinder, window, cx| {
                 let rp = root_path_ref.clone();
                 workspace.command_palette.update(cx, |pal, cx| {
                     pal.open_file_search(rp.as_deref(), cx);
+                    pal.focus_handle.focus(window, cx);
                 });
             }))
-            .on_action(cx.listener(|workspace, _: &OpenCommandPalette, _window, cx| {
+            .on_action(cx.listener(|workspace, _: &OpenCommandPalette, window, cx| {
                 workspace.command_palette.update(cx, |pal, cx| {
                     pal.open_command_palette(cx);
+                    pal.focus_handle.focus(window, cx);
                 });
             }))
             .child(self.title_bar.clone())

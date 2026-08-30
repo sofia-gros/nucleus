@@ -86,11 +86,12 @@ pub struct EditorArea {
     pub rename_state: Option<RenameState>,
     /// クイックフィックスポップアップ状態
     pub quick_fix_state: QuickFixState,
+    pub focus_handle: FocusHandle,
 }
 
 impl EditorArea {
     /// 新しい EditorArea を作成
-    pub fn new() -> Self {
+    pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
             tabs: Vec::new(),
             pending_contents: std::collections::HashMap::new(),
@@ -103,6 +104,7 @@ impl EditorArea {
             signature_help: SignatureHelpState::new(),
             rename_state: None,
             quick_fix_state: QuickFixState::default(),
+            focus_handle: cx.focus_handle(),
         }
     }
 
@@ -131,7 +133,7 @@ impl EditorArea {
         if let Some(pos) = self.tabs.iter().position(|t| t.path == kb_path) {
             self.active_tab = pos;
         } else {
-            let kb = cx.new(|_| KeybindingsView::new());
+            let kb = cx.new(|cx| KeybindingsView::new(cx));
             self.tabs.push(EditorTab {
                 path: kb_path.to_string(),
                 title: "Keyboard Shortcuts".to_string(),
@@ -847,7 +849,37 @@ impl EditorArea {
                                     .border_color(theme.border)
                                     .rounded_sm()
                                     .text_xs()
-                                    .child(if self.find_replace.query.is_empty() { "Find...".to_string() } else { self.find_replace.query.clone() })
+                                    .track_focus(&self.focus_handle)
+                                    .cursor(CursorStyle::IBeam)
+                                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
+                                        this.focus_handle.focus(window, cx);
+                                    }))
+                                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                                        let key = &event.keystroke.key;
+                                        if key == "enter" {
+                                            if event.keystroke.modifiers.shift {
+                                                this.find_replace.prev_match();
+                                            } else {
+                                                this.find_replace.next_match();
+                                            }
+                                            cx.notify();
+                                        } else if key == "escape" {
+                                            this.find_replace.close();
+                                            cx.notify();
+                                        } else if key == "backspace" {
+                                            this.find_replace.query.pop();
+                                            cx.notify();
+                                        } else if !event.keystroke.modifiers.control && !event.keystroke.modifiers.alt {
+                                            if key.len() == 1 {
+                                                this.find_replace.query.push_str(key);
+                                                cx.notify();
+                                            } else if key == "space" {
+                                                this.find_replace.query.push(' ');
+                                                cx.notify();
+                                            }
+                                        }
+                                    }))
+                                    .child(if self.find_replace.query.is_empty() { "Find (press Enter to jump)...".to_string() } else { format!("{}_", self.find_replace.query) })
                             )
                             .child(div().text_xs().text_color(theme.muted_foreground).child(count_label))
                             .child(

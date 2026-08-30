@@ -60,8 +60,17 @@ impl SettingsView {
         }
     }
 
-    /// 設定変更をストアに保存
+    /// 設定変更をストアに保存し、UIへ即時反映
     pub fn save_setting(&mut self, key: &str, value: serde_json::Value, cx: &mut Context<Self>) {
+        if key == "theme" {
+            if let Some(s) = value.as_str() {
+                let mode = match s {
+                    "light" => gpui_component::theme::ThemeMode::Light,
+                    _ => gpui_component::theme::ThemeMode::Dark,
+                };
+                gpui_component::theme::Theme::change(mode, None, cx);
+            }
+        }
         if cx.has_global::<SettingsGlobal>() {
             let mut store = cx.global::<SettingsGlobal>().0.write().unwrap();
             store.set_target(self.current_target, key, value);

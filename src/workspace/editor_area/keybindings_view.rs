@@ -17,14 +17,16 @@ pub struct KeybindingsView {
     pub query: String,
     pub keybindings: Vec<KeybindingRow>,
     pub selected_index: usize,
+    pub focus_handle: FocusHandle,
 }
 
 impl KeybindingsView {
-    pub fn new() -> Self {
+    pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
             query: String::new(),
             keybindings: Self::default_keybindings(),
             selected_index: 0,
+            focus_handle: cx.focus_handle(),
         }
     }
 
@@ -95,9 +97,32 @@ impl Render for KeybindingsView {
                             .rounded_md()
                             .flex()
                             .items_center()
+                            .track_focus(&self.focus_handle)
+                            .cursor(CursorStyle::IBeam)
+                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
+                                this.focus_handle.focus(window, cx);
+                            }))
+                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                                let key = &event.keystroke.key;
+                                if key == "backspace" {
+                                    this.query.pop();
+                                    cx.notify();
+                                } else if key == "escape" {
+                                    this.query.clear();
+                                    cx.notify();
+                                } else if !event.keystroke.modifiers.control && !event.keystroke.modifiers.alt {
+                                    if key.len() == 1 {
+                                        this.query.push_str(key);
+                                        cx.notify();
+                                    } else if key == "space" {
+                                        this.query.push(' ');
+                                        cx.notify();
+                                    }
+                                }
+                            }))
                             .child(
                                 div().text_xs().text_color(if self.query.is_empty() { theme.muted_foreground } else { theme.foreground })
-                                    .child(if self.query.is_empty() { "Type to search in keybindings...".to_string() } else { self.query.clone() })
+                                    .child(if self.query.is_empty() { "Type to search in keybindings...".to_string() } else { format!("{}_", self.query) })
                             )
                     )
             )

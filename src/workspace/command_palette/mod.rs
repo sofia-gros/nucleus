@@ -257,8 +257,46 @@ impl Render for CommandPalette {
                 .justify_center()
                 .items_start()
                 .pt(gpui::px(40.0))
+                .track_focus(&self.focus_handle)
                 .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                     this.close(cx);
+                }))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                    let key = &event.keystroke.key;
+                    if key == "escape" {
+                        this.close(cx);
+                    } else if key == "up" {
+                        if this.selected_index > 0 {
+                            this.selected_index -= 1;
+                            cx.notify();
+                        }
+                    } else if key == "down" {
+                        let total = this.filtered_items().len();
+                        if total > 0 && this.selected_index + 1 < total {
+                            this.selected_index += 1;
+                            cx.notify();
+                        }
+                    } else if key == "enter" {
+                        let filtered = this.filtered_items();
+                        if let Some(item) = filtered.get(this.selected_index) {
+                            let item_to_exec = item.clone();
+                            this.execute_item(&item_to_exec, cx);
+                        }
+                    } else if key == "backspace" {
+                        this.query.pop();
+                        this.selected_index = 0;
+                        cx.notify();
+                    } else if !event.keystroke.modifiers.control && !event.keystroke.modifiers.alt {
+                        if key.len() == 1 {
+                            this.query.push_str(key);
+                            this.selected_index = 0;
+                            cx.notify();
+                        } else if key == "space" {
+                            this.query.push(' ');
+                            this.selected_index = 0;
+                            cx.notify();
+                        }
+                    }
                 }))
                 .child(
                     div()
@@ -271,8 +309,9 @@ impl Render for CommandPalette {
                         .flex()
                         .flex_col()
                         .overflow_hidden()
-                        .on_mouse_down(MouseButton::Left, cx.listener(|_, _, _, cx| {
+                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
                             cx.stop_propagation();
+                            this.focus_handle.focus(window, cx);
                         }))
                         // 検索入力欄
                         .child(
@@ -283,6 +322,7 @@ impl Render for CommandPalette {
                                 .flex()
                                 .items_center()
                                 .gap_2()
+                                .cursor(CursorStyle::IBeam)
                                 .child(Icon::new(prefix_icon).size(gpui::px(14.0)).text_color(theme.muted_foreground))
                                 .child(
                                     div()
@@ -292,7 +332,7 @@ impl Render for CommandPalette {
                                         .child(if self.query.is_empty() {
                                             div().text_color(theme.muted_foreground).child(placeholder).into_any_element()
                                         } else {
-                                            div().child(self.query.clone()).into_any_element()
+                                            div().child(format!("{}_", self.query)).into_any_element()
                                         })
                                 )
                         )
