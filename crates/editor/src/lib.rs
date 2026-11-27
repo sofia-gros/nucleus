@@ -1,6 +1,9 @@
 //! エディタ（docs/ARCHITECTURE.md §7）。テキストの正本は gpui-kit の EditorState が持つ Rope だけ。
 
 pub mod file;
+mod find_panel;
+
+use find_panel::{FindNext, FindPanel, FindPanelEvent, FindPrevious};
 
 use std::path::{Path, PathBuf};
 
@@ -12,7 +15,7 @@ use gpui_kit::{
         Icon, Sizable as _,
         dock::{BasePanel, Panel, PanelEvent},
         h_flex,
-        input::{Editor, EditorState, InputEvent, Position, TabSize},
+        input::{Editor, EditorState, InputEvent, Position, Replace, Search, TabSize},
     },
     div, px,
 };
@@ -25,6 +28,7 @@ actions!(editor, [Save]);
 const CONTEXT: &str = "EditorPanel";
 
 pub fn init(cx: &mut App) {
+    find_panel::init(cx);
     cx.bind_keys([KeyBinding::new("ctrl-s", Save, Some(CONTEXT))]);
 }
 
@@ -48,6 +52,7 @@ pub struct EditorPanel {
     version: u64,
     saved_version: u64,
     saving: bool,
+    find_panel: Option<Entity<FindPanel>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -59,7 +64,8 @@ impl EditorPanel {
                 .language(language.clone())
                 .line_number(true)
                 .indent_guides(true)
-                .searchable(true)
+                // 組み込みの検索バーは使わない（Ctrl+F は EditorPanel の Atom 式パネルが受け取る）。
+                .searchable(false)
                 .tab_size(TabSize {
                     tab_size: 4,
                     hard_tabs: false,
@@ -95,6 +101,7 @@ impl EditorPanel {
             version: 0,
             saved_version: 0,
             saving: false,
+            find_panel: None,
             _subscriptions: subs,
         }
     }
@@ -177,11 +184,30 @@ impl EditorPanel {
         self.saving
     }
 
-    /// ファイル内検索を開く。
+    /// ファイル内検索（Atom 式の下部パネル）を開く。
     pub fn open_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let focus = self.state.read(cx).focus_handle(cx);
-        focus.focus(window, cx);
-        self.state.update(cx, |s, cx| s.open_search(false, cx));
+        self.open_find(false, window, cx);
+    }
+
+    fn open_find(&mut self, replace: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let panel = match &self.find_panel {
+            Some(p) => p.clone(),
+            None => {
+                let state = self.state.clone();
+                let p = cx.new(|cx| FindPanel::new(state, window, cx));
+                self._subscriptions
+                    .push(cx.subscribe(&p, |this, _, e: &FindPanelEvent, cx| match e {
+                        FindPanelEvent::Closed => {
+                            this.find_panel = None;
+                            cx.notify();
+                        }
+                    }));
+                self.find_panel = Some(p.clone());
+                p
+            }
+        };
+        panel.update(cx, |p, cx| p.activate(replace, window, cx));
+        cx.notify();
     }
 }
 
@@ -237,8 +263,28 @@ impl Render for EditorPanel {
         div()
             .key_context(CONTEXT)
             .on_action(cx.listener(|this, _: &Save, _, cx| this.save(cx).detach()))
+            .on_action(cx.listener(|this, _: &Search, window, cx| this.open_find(false, window, cx)))
+            .on_action(cx.listener(|this, _: &Replace, window, cx| this.open_find(true, window, cx)))
+            .on_action(cx.listener(|this, _: &FindNext, window, cx| match &this.find_panel {
+                Some(p) => p.update(cx, |p, cx| p.find_next(cx)),
+                None => this.open_find(false, window, cx),
+            }))
+            .on_action(
+                cx.listener(|this, _: &FindPrevious, window, cx| match &this.find_panel {
+                    Some(p) => p.update(cx, |p, cx| p.find_previous(cx)),
+                    None => this.open_find(false, window, cx),
+                }),
+            )
             .size_full()
+            .flex()
+            .flex_col()
             .bg(cx.token(Token::HighlightEditorBackground))
-            .child(Editor::new(&self.state).bordered(false).h_full())
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .child(Editor::new(&self.state).bordered(false).h_full()),
+            )
+            .children(self.find_panel.clone())
     }
 }

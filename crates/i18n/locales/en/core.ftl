@@ -106,3 +106,15 @@ core-command-open-settings = Preferences: Open Settings (JSON)
 core-command-open-workspace-settings = Preferences: Open Folder Settings (JSON)
 core-notify-settings-error = Settings were not applied: { $error }
 core-notify-keymap-restart = Keymap changes take effect after restarting Nucleus.
+
+## Find & replace (editor)
+core-find-title = Find in Current Buffer
+core-find-hint = Type to search. Enter: next, Shift+Enter: previous, Esc: close
+core-find-results = { $current } of { $count } for “{ $query }”
+core-find-no-results = No results for “{ $query }”
+core-find-find-placeholder = Find in current buffer
+core-find-replace-placeholder = Replace in current buffer
+core-find-find = Find
+core-find-replace = Replace
+core-find-replace-all = Replace All
+core-find-case-sensitive = Match case

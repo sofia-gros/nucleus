@@ -101,3 +101,15 @@ core-command-open-settings = 設定: 設定ファイル（JSON）を開く
 core-command-open-workspace-settings = 設定: このフォルダの設定ファイル（JSON）を開く
 core-notify-settings-error = 設定を反映できませんでした: { $error }
 core-notify-keymap-restart = キーバインドの変更は Nucleus の再起動後に反映されます。
+
+## 検索と置換（エディタ）
+core-find-title = 現在のファイル内を検索
+core-find-hint = 入力すると検索します。Enter: 次へ、Shift+Enter: 前へ、Esc: 閉じる
+core-find-results = 「{ $query }」 { $count } 件中 { $current } 件目
+core-find-no-results = 「{ $query }」は見つかりません
+core-find-find-placeholder = 現在のファイル内を検索
+core-find-replace-placeholder = 置換後の文字列
+core-find-find = 検索
+core-find-replace = 置換
+core-find-replace-all = すべて置換
+core-find-case-sensitive = 大文字と小文字を区別

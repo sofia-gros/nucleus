@@ -17,7 +17,8 @@ Core は小さく速く保ち、機能はすべて Extension で足します。
 | `crates/i18n` | Fluent による多言語化（英語・日本語、言語パック） |
 | `crates/project` | 開いているフォルダのツリー（遅延読み込み、`.gitignore`、ファイル監視） |
 | `crates/editor` | エディタパネル（gpui-kit の code editor、読み書き、改行コードの保持） |
-| `crates/workspace` | メインウィンドウ（TitleBar / DockArea / StatusBar）、パネル、ファイルを開く流れ |
+| `crates/settings` | 設定（既定 / ユーザー / フォルダの3層、コメント付き JSON） |
+| `crates/workspace` | メインウィンドウ（TitleBar / DockArea / StatusBar）、パネル、コマンドパレット、ファイル検索、セッション |
 
 ## ビルドと実行
 
@@ -39,13 +40,28 @@ cargo run -p nucleus -- path/to/project
 
 | キー | 操作 |
 |---|---|
+| `Ctrl+Shift+P` / `F1` | コマンドパレット |
+| `Ctrl+P` | ファイルへ移動 |
 | `Ctrl+O` | フォルダを開く |
 | `Ctrl+S` | 保存 |
-| `Ctrl+F` | ファイル内を検索 |
+| `Ctrl+W` | タブを閉じる |
+| `Ctrl+F` / `Ctrl+H` | ファイル内を検索 / 置換（`F3` / `Shift+F3` で次 / 前） |
+| `Ctrl+,` | 設定ファイルを開く |
 | `Ctrl+B` / `Ctrl+J` / `Ctrl+Alt+B` | 左 / 下 / 右のドックを開閉 |
 | `Ctrl+Q` | 終了 |
 
-表示言語は OS の設定に従います。`NUCLEUS_LANG=ja` のように指定して切り替えることもできます。
+表示言語は OS の設定に従います。設定ファイル（`~/.config/nucleus/settings.json`）の `"language"` か、環境変数 `NUCLEUS_LANG=ja` で切り替えられます。前回開いていたフォルダとファイルは、次回の起動時に復元されます。
+
+設定の例（保存すると即座に反映されます）:
+
+```jsonc
+{
+  "theme": "Nucleus One Light",
+  "language": "ja",
+  "editor": { "font_size": 14, "tab_size": 2, "soft_wrap": true },
+  "keymap": [{ "key": "ctrl-shift-e", "command": "workspace::ToggleLeftDock" }]
+}
+```
 
 ```bash
 cargo test --workspace

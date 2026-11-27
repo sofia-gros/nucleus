@@ -270,9 +270,13 @@ l10n: l10n/                  # l10n/core.ftl, l10n/anthropic.claude.ftl …
 1. **P0 基盤:** Cargo workspace、`theme`（Core Token の生成、Nucleus One Dark/Light、キャッシュ）、`i18n`（Fluent、en/ja）、ウィンドウと Workspace の骨格（TitleBar・DockArea・StatusBar） — **完了**（Dock のレイアウトの保存と復元は P2 で行う）
 2. **P1 エディタ:** フォルダを開く、ProjectTree、ファイルを開く・編集・保存、タブ、検索バー — **完了**
    - 暫定: tree-sitter の文法は今は gpui-kit の機能として Core に同梱している。P4 で `language` 権限の Extension に移す。
-   - 暫定: `Ctrl+F` は gpui-kit 組み込みの検索バー（エディタ上部）。デザインの Atom 式の下部パネル（06 Find & Replace）は P2 で作る。
-   - 未対応: 未保存のタブを閉じるときの確認、開いたファイルをツリーで表示する（reveal）。
-3. **P2 操作系:** コマンドパレット、ファイル検索、設定、キーバインド
+   - 未対応: 開いたファイルをツリーで表示する（reveal）。
+3. **P2 操作系:** コマンドパレット、ファイル検索、設定、キーバインド — **完了**
+   - コマンドパレット（`Ctrl+Shift+P`）とファイル検索（`Ctrl+P`）は gpui-kit の `Command` 部品に、自前のあいまい検索（nucleo）の結果を渡す。
+   - 未保存のタブは Atom と同じく閉じるボタンの代わりに ● を出し、`Ctrl+W`・ウィンドウを閉じる・終了で「保存 / 保存しない / キャンセル」を確認する。確認ダイアログは gpui の prompt を差し替えた Token だけで描くもの。
+   - 設定は 既定 → ユーザー → フォルダ の3層の JSON（コメント可）。保存すると即座に反映する（テーマ、表示言語、エディタのフォントとタブ幅など）。キーバインドは設定の `keymap` で足せる（反映は再起動後。gpui のキーバインドは個別に外せないため）。
+   - セッション（開いていたフォルダ・ファイル・ドックの状態）を保存し、次回の起動で復元する。gpui-kit の `DockArea::load` は使わず、Nucleus 独自の形式で持つ。
+   - 検索と置換は Atom 式の下部パネル（`Ctrl+F` / `Ctrl+H`、`F3` / `Shift+F3`）。gpui-kit エディタの検索エンジンが対応していないため、正規表現と単語単位の検索は未対応（大文字小文字の区別のみ）。
 4. **P3 端末:** Terminal（下ドック）
 5. **P4 Extension 基盤:** マニフェストと権限、起動の流れ、データ系の権限（テーマ・言語パック・文法）
 6. **P5 WASM:** `core@1` の API、コマンド、言語サーバーの起動設定 → LSP
