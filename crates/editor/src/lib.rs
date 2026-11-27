@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use gpui_kit::{
     App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement,
-    KeyBinding, ParentElement, Render, SharedString, Styled, Subscription, Window, actions,
+    KeyBinding, ParentElement, Render, SharedString, Styled, Subscription, Task, Window, actions,
     assets::IconName,
     component::{
         Icon, Sizable as _,
@@ -124,35 +124,44 @@ impl EditorPanel {
     }
 
     /// 保存する。Rope のスナップショット（O(1)）をバックグラウンドで書き出す。
-    pub fn save(&mut self, cx: &mut Context<Self>) {
-        if self.saving {
-            return;
-        }
-        self.saving = true;
+    /// 返り値のタスクは保存が終わると完了する（未保存の確認ダイアログから待つため）。
+    pub fn save(&mut self, cx: &mut Context<Self>) -> Task<Result<(), String>> {
         let rope = self.state.read(cx).text().clone();
         let version = self.version;
         let path = self.path.clone();
         let line_ending = self.line_ending;
-        let task = cx.background_spawn(async move { file::save(&path, rope.chunks(), line_ending) });
+        self.saving = true;
+        let write = cx.background_spawn(async move { file::save(&path, rope.chunks(), line_ending) });
         cx.spawn(async move |this, cx| {
-            let result = task.await;
+            let result = write.await.map_err(|e| e.to_string());
             this.update(cx, |this, cx| {
                 this.saving = false;
-                match result {
+                match &result {
                     Ok(()) => {
-                        this.saved_version = version;
+                        this.saved_version = this.saved_version.max(version);
                         cx.emit(EditorEvent::Saved);
                     }
                     Err(e) => {
                         log::error!("{} を保存できなかった: {e}", this.path.display());
-                        cx.emit(EditorEvent::SaveFailed(e.to_string()));
+                        cx.emit(EditorEvent::SaveFailed(e.clone()));
                     }
                 }
                 cx.notify();
             })
             .ok();
+            result
         })
-        .detach();
+    }
+
+    pub fn is_saving(&self) -> bool {
+        self.saving
+    }
+
+    /// ファイル内検索を開く。
+    pub fn open_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let focus = self.state.read(cx).focus_handle(cx);
+        focus.focus(window, cx);
+        self.state.update(cx, |s, cx| s.open_search(false, cx));
     }
 }
 
@@ -168,6 +177,12 @@ impl Focusable for EditorPanel {
 impl BasePanel for EditorPanel {
     fn panel_name(&self) -> &'static str {
         "nucleus.editor"
+    }
+
+    /// Atom と同じく、未保存のタブには閉じるボタンの代わりに ● を出す。
+    /// 未保存のまま閉じるときは Workspace の「タブを閉じる」で確認する。
+    fn closable(&self, _: &App) -> bool {
+        !self.is_dirty()
     }
 }
 
@@ -201,7 +216,7 @@ impl Render for EditorPanel {
         let _ = &self.focus;
         div()
             .key_context(CONTEXT)
-            .on_action(cx.listener(|this, _: &Save, _, cx| this.save(cx)))
+            .on_action(cx.listener(|this, _: &Save, _, cx| this.save(cx).detach()))
             .size_full()
             .bg(cx.token(Token::HighlightEditorBackground))
             .child(Editor::new(&self.state).bordered(false).h_full())

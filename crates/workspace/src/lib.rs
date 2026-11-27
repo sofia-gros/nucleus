@@ -1,12 +1,18 @@
 //! ワークスペース（メインウィンドウ）: TitleBar / DockArea / StatusBar と、ファイルを開く流れ。
 
 mod assets;
+mod close;
+mod commands;
+mod finder;
+mod palette;
 mod panels;
 mod project_panel;
+mod prompt;
 
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use editor::{EditorEvent, EditorPanel, LoadError};
@@ -30,23 +36,44 @@ use i18n::Translate as _;
 use theme::{Token, TokenColors as _};
 
 pub use assets::{Assets, fonts};
+use palette::{Palette, PaletteKind};
 use panels::{CorePanel, PanelKind};
 use project_panel::{ProjectPanel, ProjectPanelEvent};
 
 actions!(
     workspace,
-    [ToggleLeftDock, ToggleBottomDock, ToggleRightDock, OpenFolder, Quit]
+    [
+        ToggleLeftDock,
+        ToggleBottomDock,
+        ToggleRightDock,
+        OpenFolder,
+        Quit,
+        CommandPalette,
+        FindFile,
+        CloseActiveEditor,
+        SaveActiveEditor,
+        SearchInActiveEditor,
+        ToggleTheme,
+        UseEnglish,
+        UseJapanese,
+    ]
 );
 
 const CONTEXT: &str = "Workspace";
 
 pub fn init(cx: &mut App) {
     editor::init(cx);
+    prompt::init(cx);
     cx.bind_keys([
         KeyBinding::new("ctrl-b", ToggleLeftDock, Some(CONTEXT)),
         KeyBinding::new("ctrl-j", ToggleBottomDock, Some(CONTEXT)),
         KeyBinding::new("ctrl-alt-b", ToggleRightDock, Some(CONTEXT)),
         KeyBinding::new("ctrl-o", OpenFolder, Some(CONTEXT)),
+        KeyBinding::new("ctrl-shift-p", CommandPalette, Some(CONTEXT)),
+        KeyBinding::new("f1", CommandPalette, Some(CONTEXT)),
+        KeyBinding::new("ctrl-p", FindFile, Some(CONTEXT)),
+        KeyBinding::new("ctrl-w", CloseActiveEditor, Some(CONTEXT)),
+        KeyBinding::new("ctrl-s", SaveActiveEditor, Some(CONTEXT)),
         KeyBinding::new("ctrl-q", Quit, None),
     ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
@@ -77,6 +104,11 @@ pub struct Workspace {
     project: Entity<ProjectPanel>,
     editors: HashMap<PathBuf, WeakEntity<EditorPanel>>,
     active: Option<WeakEntity<EditorPanel>>,
+    palette: Option<Palette>,
+    file_index: Option<Arc<Vec<String>>>,
+    indexing: bool,
+    /// 未保存の確認に答えた後は、ウィンドウを閉じる要求をそのまま通す。
+    close_confirmed: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -139,12 +171,21 @@ impl Workspace {
         ];
         let focus = cx.focus_handle();
         focus.focus(window, cx);
+        let this = cx.entity().downgrade();
+        window.on_window_should_close(cx, move |window, cx| {
+            this.update(cx, |ws, cx| ws.should_close_window(window, cx))
+                .unwrap_or(true)
+        });
         Workspace {
             focus,
             dock_area,
             project,
             editors: HashMap::new(),
             active: None,
+            palette: None,
+            file_index: None,
+            indexing: false,
+            close_confirmed: false,
             _subscriptions: subs,
         }
     }
@@ -426,6 +467,30 @@ impl Render for Workspace {
                 cx.listener(|this, _: &ToggleRightDock, window, cx| this.toggle(DockPlacement::Right, window, cx)),
             )
             .on_action(cx.listener(|this, _: &OpenFolder, window, cx| this.prompt_open_folder(window, cx)))
+            .on_action(cx.listener(|this, _: &CommandPalette, window, cx| {
+                this.toggle_palette(PaletteKind::Commands, window, cx)
+            }))
+            .on_action(
+                cx.listener(|this, _: &FindFile, window, cx| this.toggle_palette(PaletteKind::Files, window, cx)),
+            )
+            .on_action(cx.listener(|this, _: &CloseActiveEditor, window, cx| this.close_active_editor(window, cx)))
+            .on_action(cx.listener(|this, _: &SaveActiveEditor, _, cx| {
+                if let Some(e) = this.active_editor(cx) {
+                    e.update(cx, |e, cx| e.save(cx)).detach();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &SearchInActiveEditor, window, cx| {
+                if let Some(e) = this.active_editor(cx) {
+                    e.update(cx, |e, cx| e.open_search(window, cx));
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ToggleTheme, _, cx| this.toggle_theme(cx)))
+            .on_action(cx.listener(|_, _: &UseEnglish, _, cx| i18n::set_language(i18n::en(), cx)))
+            .on_action(
+                cx.listener(|_, _: &UseJapanese, _, cx| i18n::set_language("ja".parse().expect("valid tag"), cx)),
+            )
+            .on_action(cx.listener(|this, _: &Quit, window, cx| this.quit(window, cx)))
+            .relative()
             .size_full()
             .bg(cx.token(Token::Background))
             .text_color(cx.token(Token::Foreground))
@@ -433,5 +498,6 @@ impl Render for Workspace {
             .child(self.render_title_bar(cx))
             .child(div().flex_1().min_h_0().child(self.dock_area.clone()))
             .child(self.render_status_bar(cx))
+            .children(self.render_palette(cx))
     }
 }

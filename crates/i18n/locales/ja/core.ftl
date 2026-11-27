@@ -64,3 +64,34 @@ core-notify-binary = { $file } はバイナリファイルのようなので開�
 core-notify-too-large = { $file } は大きすぎるため開けません。
 core-notify-save-failed = { $file } を保存できませんでした: { $error }
 core-status-language-text = プレーンテキスト
+
+## コマンド
+core-command-find-file = ファイルへ移動
+core-command-open-folder = フォルダを開く…
+core-command-save = 保存
+core-command-find-in-file = ファイル内を検索
+core-command-close-tab = タブを閉じる
+core-command-toggle-left-dock = 左ドックの表示切り替え
+core-command-toggle-bottom-dock = 下ドックの表示切り替え
+core-command-toggle-right-dock = 右ドックの表示切り替え
+core-command-toggle-theme = テーマ: ライト / ダークの切り替え
+core-command-language-en = 表示言語: 英語 (English)
+core-command-language-ja = 表示言語: 日本語
+core-command-command-palette = すべてのコマンドを表示
+core-command-quit = 終了
+
+## パレット
+core-palette-commands-placeholder = コマンドを入力…
+core-palette-files-placeholder = ファイル名で検索…
+core-palette-no-results = 一致するものがありません
+core-palette-no-project = フォルダを開くと、ファイルを検索できます。
+core-palette-indexing = ファイルの一覧を作成中…
+
+## 未保存の変更
+core-prompt-unsaved-one = { $file } への変更を保存しますか？
+core-prompt-unsaved-many = { $count } 個のファイルに未保存の変更があります。閉じる前に保存しますか？
+core-prompt-unsaved-detail = 保存しないと、変更は失われます。
+core-prompt-save = 保存
+core-prompt-save-all = すべて保存
+core-prompt-dont-save = 保存しない
+core-prompt-cancel = キャンセル

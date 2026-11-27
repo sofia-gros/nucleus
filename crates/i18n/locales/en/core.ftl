@@ -69,3 +69,34 @@ core-notify-binary = { $file } looks like a binary file and was not opened.
 core-notify-too-large = { $file } is too large to open.
 core-notify-save-failed = Could not save { $file }: { $error }
 core-status-language-text = Plain Text
+
+## Commands
+core-command-find-file = Go to File
+core-command-open-folder = Open Folder…
+core-command-save = Save
+core-command-find-in-file = Find in File
+core-command-close-tab = Close Tab
+core-command-toggle-left-dock = Toggle Left Dock
+core-command-toggle-bottom-dock = Toggle Bottom Dock
+core-command-toggle-right-dock = Toggle Right Dock
+core-command-toggle-theme = Theme: Toggle Light / Dark
+core-command-language-en = Language: English
+core-command-language-ja = Language: Japanese (日本語)
+core-command-command-palette = Show All Commands
+core-command-quit = Quit
+
+## Palette
+core-palette-commands-placeholder = Type a command…
+core-palette-files-placeholder = Search files by name…
+core-palette-no-results = No matching results
+core-palette-no-project = Open a folder to search its files.
+core-palette-indexing = Indexing files…
+
+## Unsaved changes
+core-prompt-unsaved-one = Do you want to save the changes you made to { $file }?
+core-prompt-unsaved-many = You have unsaved changes in { $count } files. Save them before closing?
+core-prompt-unsaved-detail = Your changes will be lost if you don't save them.
+core-prompt-save = Save
+core-prompt-save-all = Save All
+core-prompt-dont-save = Don't Save
+core-prompt-cancel = Cancel
