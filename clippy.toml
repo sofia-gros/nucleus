@@ -1,0 +1,17 @@
+# 色は必ず theme::Token（テーマ変数）から取る。直書きできるのは theme クレートだけ。
+disallowed-methods = [
+  { path = "gpui::rgb", reason = "色は theme::Token から取る（cx.token(Token::…)）" },
+  { path = "gpui::rgba", reason = "色は theme::Token から取る（cx.token(Token::…)）" },
+  { path = "gpui::hsla", reason = "色は theme::Token から取る（cx.token(Token::…)）" },
+  { path = "gpui::black", reason = "色は theme::Token から取る" },
+  { path = "gpui::white", reason = "色は theme::Token から取る" },
+  { path = "gpui::red", reason = "色は theme::Token から取る" },
+  { path = "gpui::green", reason = "色は theme::Token から取る" },
+  { path = "gpui::blue", reason = "色は theme::Token から取る" },
+  { path = "gpui::yellow", reason = "色は theme::Token から取る" },
+  { path = "gpui::transparent_black", reason = "色は theme::Token から取る" },
+  { path = "gpui::transparent_white", reason = "色は theme::Token から取る" },
+]
+disallowed-types = [
+  { path = "gpui::Rgba", reason = "色は theme::Token から取る" },
+]

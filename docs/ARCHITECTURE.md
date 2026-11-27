@@ -208,6 +208,7 @@ WIT の world は次の2つ。
 - **キーの規則:**
   - Core: `core.<領域>.<名前>`（例: `core.menu.file`、`core.status.line-col`）
   - Extension: `<extension-id>.<名前>`
+  - Fluent の識別子には `.` を使えないため、`.ftl` ファイルの中では `.` を `-` に置き換えて書く（`core.menu.file` → `core-menu-file`）。コードからは `.` 区切りのまま引く。
 - **マニフェストでの参照:** `"%key%"` と書くと i18n キーとして扱う（`name`、コマンドの `title` など）。
 - **UI ツリーの文言:** `text(key, args)` で i18n キーを渡す。ユーザーのデータ（ファイル名やコードなど）は翻訳しない生の文字列として渡し、種類を区別する。
 
@@ -266,7 +267,7 @@ l10n: l10n/                  # l10n/core.ftl, l10n/anthropic.claude.ftl …
 ---
 
 ## 9. 実装の順番
-1. **P0 基盤:** Cargo workspace、`theme`（Core Token の生成、Nucleus One Dark/Light、キャッシュ）、`i18n`（Fluent、en/ja）、ウィンドウと Workspace の骨格（TitleBar・DockArea・StatusBar）
+1. **P0 基盤:** Cargo workspace、`theme`（Core Token の生成、Nucleus One Dark/Light、キャッシュ）、`i18n`（Fluent、en/ja）、ウィンドウと Workspace の骨格（TitleBar・DockArea・StatusBar） — **完了**（Dock のレイアウトの保存と復元は P2 で行う）
 2. **P1 エディタ:** フォルダを開く、ProjectTree、ファイルを開く・編集・保存、タブ、検索バー
 3. **P2 操作系:** コマンドパレット、ファイル検索、設定、キーバインド
 4. **P3 端末:** Terminal（下ドック）

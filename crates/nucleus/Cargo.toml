@@ -1,0 +1,18 @@
+[package]
+name = "nucleus"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+gpui-kit.workspace = true
+anyhow.workspace = true
+log.workspace = true
+env_logger.workspace = true
+theme.workspace = true
+i18n.workspace = true
+workspace.workspace = true
+
+[lints]
+workspace = true

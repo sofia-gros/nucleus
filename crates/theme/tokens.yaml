@@ -1,0 +1,111 @@
+# Core Token（すべてのテーマが持つ色の変数）。このファイルが唯一の定義元。
+# - key: gpui-kit の ThemeColor / highlight のキーと同じ名前にする。
+#   `highlight.` で始まるものは gpui-kit の highlight テーマ（エディタとシンタックス）に、
+#   それ以外は colors に渡す。
+# - gpui: false のものは Nucleus だけが使う（gpui-kit には渡さない）。
+# build.rs がここから `enum Token` を生成する。
+
+# --- base ---
+- { key: background,                 doc: "アプリ全体の背景" }
+- { key: foreground,                 doc: "標準の文字色" }
+- { key: border,                     doc: "境界線" }
+- { key: muted.background,           doc: "控えめな面（入力欄の背景、セクション見出し）" }
+- { key: muted.foreground,           doc: "補足の文字色" }
+- { key: accent.background,          doc: "ホバー・選択中の面" }
+- { key: accent.foreground,          doc: "accent 上の文字色" }
+- { key: primary.background,         doc: "主要ボタン・強調色" }
+- { key: primary.foreground,         doc: "primary 上の文字色" }
+- { key: primary.hover.background,   doc: "primary のホバー" }
+- { key: primary.active.background,  doc: "primary の押下" }
+- { key: secondary.background,       doc: "副ボタン" }
+- { key: secondary.foreground,       doc: "secondary 上の文字色" }
+- { key: secondary.hover.background, doc: "secondary のホバー" }
+- { key: secondary.active.background, doc: "secondary の押下" }
+- { key: input.border,               doc: "入力欄の枠" }
+- { key: ring,                       doc: "フォーカスリング" }
+- { key: caret,                      doc: "キャレット" }
+- { key: selection.background,       doc: "テキスト選択" }
+- { key: link,                       doc: "リンク" }
+- { key: overlay,                    doc: "モーダルの背景を暗くする色" }
+- { key: window.border,              doc: "ウィンドウの枠" }
+- { key: drag.border,                doc: "ドラッグ中のドロップ先の枠" }
+- { key: drop_target.background,     doc: "ドロップ先の面" }
+- { key: skeleton.background,        doc: "読み込み中の表示" }
+- { key: switch.background,          doc: "OFF のスイッチ" }
+# --- status ---
+- { key: danger.background,          doc: "エラー・破壊的操作" }
+- { key: danger.foreground,          doc: "danger 上の文字色" }
+- { key: success.background,         doc: "成功" }
+- { key: success.foreground,         doc: "success 上の文字色" }
+- { key: warning.background,         doc: "警告" }
+- { key: warning.foreground,         doc: "warning 上の文字色" }
+- { key: info.background,            doc: "情報" }
+- { key: info.foreground,            doc: "info 上の文字色" }
+# --- surfaces ---
+- { key: popover.background,         doc: "ポップオーバー・メニュー・パレット" }
+- { key: popover.foreground,         doc: "popover 上の文字色" }
+- { key: list.background,            doc: "リストの背景" }
+- { key: list.hover.background,      doc: "リスト行のホバー" }
+- { key: list.active.background,     doc: "リスト行の選択" }
+- { key: list.active.border,         doc: "選択行の左端の線" }
+- { key: list.even.background,       doc: "縞模様の偶数行" }
+- { key: list.head.background,       doc: "リストの見出し行" }
+- { key: list.highlight.foreground,  doc: "検索一致・強調の文字色" }
+- { key: sidebar.background,         doc: "ドックの背景" }
+- { key: sidebar.foreground,         doc: "ドックの文字色" }
+- { key: sidebar.border,             doc: "ドックの境界線" }
+- { key: sidebar.accent.background,  doc: "ドック内の選択項目" }
+- { key: sidebar.accent.foreground,  doc: "ドック内の選択項目の文字色" }
+- { key: sidebar.primary.background, doc: "ドック内の主要項目" }
+- { key: sidebar.primary.foreground, doc: "ドック内の主要項目の文字色" }
+- { key: tab_bar.background,         doc: "タブバー" }
+- { key: tab.background,             doc: "非アクティブなタブ" }
+- { key: tab.foreground,             doc: "非アクティブなタブの文字色" }
+- { key: tab.active.background,      doc: "アクティブなタブ" }
+- { key: tab.active.foreground,      doc: "アクティブなタブの文字色" }
+- { key: title_bar.background,       doc: "タイトルバー" }
+- { key: title_bar.border,           doc: "タイトルバーの下線" }
+- { key: status_bar.background,      doc: "ステータスバー" }
+- { key: status_bar.border,          doc: "ステータスバーの上線" }
+- { key: scrollbar.background,       doc: "スクロールバーの溝" }
+- { key: scrollbar.thumb.background, doc: "スクロールバーのつまみ" }
+- { key: scrollbar.thumb.hover.background, doc: "スクロールバーのつまみ（ホバー）" }
+# --- editor (gpui-kit highlight theme) ---
+- { key: highlight.editor.background,         doc: "エディタの背景" }
+- { key: highlight.editor.foreground,         doc: "エディタの文字色" }
+- { key: highlight.editor.active_line.background, doc: "カーソル行" }
+- { key: highlight.editor.line_number,        doc: "行番号" }
+- { key: highlight.editor.active_line_number, doc: "カーソル行の行番号" }
+- { key: highlight.editor.invisible,          doc: "空白文字の表示" }
+- { key: highlight.created,                   doc: "追加（Git・Diff）" }
+- { key: highlight.modified,                  doc: "変更（Git・未保存）" }
+- { key: highlight.deleted,                   doc: "削除（Git・Diff）" }
+- { key: highlight.created.background,        doc: "Diff の追加行", gpui: false }
+- { key: highlight.deleted.background,        doc: "Diff の削除行", gpui: false }
+- { key: highlight.error,                     doc: "診断: エラー" }
+- { key: highlight.error.background,          doc: "診断: エラーの背景" }
+- { key: highlight.warning,                   doc: "診断: 警告" }
+- { key: highlight.warning.background,        doc: "診断: 警告の背景" }
+- { key: highlight.info,                      doc: "診断: 情報" }
+- { key: highlight.hint,                      doc: "診断: ヒント・インレイヒント" }
+# --- syntax ---
+- { key: highlight.syntax.keyword,      doc: "キーワード" }
+- { key: highlight.syntax.function,     doc: "関数" }
+- { key: highlight.syntax.string,       doc: "文字列" }
+- { key: highlight.syntax.string.escape, doc: "エスケープ" }
+- { key: highlight.syntax.number,       doc: "数値" }
+- { key: highlight.syntax.boolean,      doc: "真偽値" }
+- { key: highlight.syntax.type,         doc: "型" }
+- { key: highlight.syntax.constructor,  doc: "コンストラクタ・enum の値" }
+- { key: highlight.syntax.comment,      doc: "コメント" }
+- { key: highlight.syntax.comment.doc,  doc: "ドキュメントコメント" }
+- { key: highlight.syntax.variable,     doc: "変数" }
+- { key: highlight.syntax.variable.special, doc: "self など" }
+- { key: highlight.syntax.property,     doc: "フィールド・プロパティ" }
+- { key: highlight.syntax.constant,     doc: "定数" }
+- { key: highlight.syntax.attribute,    doc: "属性" }
+- { key: highlight.syntax.operator,     doc: "演算子" }
+- { key: highlight.syntax.punctuation,  doc: "句読点" }
+- { key: highlight.syntax.tag,          doc: "タグ（HTML など）" }
+- { key: highlight.syntax.label,        doc: "ラベル・ライフタイム" }
+- { key: highlight.syntax.preproc,      doc: "プリプロセッサ・マクロ" }
