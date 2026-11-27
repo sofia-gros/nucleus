@@ -100,3 +100,9 @@ core-prompt-save = Save
 core-prompt-save-all = Save All
 core-prompt-dont-save = Don't Save
 core-prompt-cancel = Cancel
+
+## Settings
+core-command-open-settings = Preferences: Open Settings (JSON)
+core-command-open-workspace-settings = Preferences: Open Folder Settings (JSON)
+core-notify-settings-error = Settings were not applied: { $error }
+core-notify-keymap-restart = Keymap changes take effect after restarting Nucleus.

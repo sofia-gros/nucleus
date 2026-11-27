@@ -1388,6 +1388,7 @@ dependencies = [
  "gpui-kit",
  "i18n",
  "log",
+ "settings",
  "tempfile",
  "theme",
 ]
@@ -6315,6 +6316,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "settings"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dirs 6.0.0",
+ "gpui-kit",
+ "log",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "sha1_smol"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8689,6 +8703,7 @@ name = "workspace"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "dirs 6.0.0",
  "editor",
  "futures",
  "gpui-kit",
@@ -8697,6 +8712,9 @@ dependencies = [
  "log",
  "nucleo-matcher",
  "project",
+ "serde",
+ "serde_json",
+ "settings",
  "tempfile",
  "theme",
 ]

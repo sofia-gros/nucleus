@@ -95,3 +95,9 @@ core-prompt-save = 保存
 core-prompt-save-all = すべて保存
 core-prompt-dont-save = 保存しない
 core-prompt-cancel = キャンセル
+
+## 設定
+core-command-open-settings = 設定: 設定ファイル（JSON）を開く
+core-command-open-workspace-settings = 設定: このフォルダの設定ファイル（JSON）を開く
+core-notify-settings-error = 設定を反映できませんでした: { $error }
+core-notify-keymap-restart = キーバインドの変更は Nucleus の再起動後に反映されます。

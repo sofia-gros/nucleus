@@ -8,9 +8,11 @@ mod palette;
 mod panels;
 mod project_panel;
 mod prompt;
+mod session;
+mod settings_sync;
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -18,7 +20,7 @@ use std::{
 use editor::{EditorEvent, EditorPanel, LoadError};
 use gpui_kit::{
     App, AppContext as _, Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _, IntoElement,
-    KeyBinding, ParentElement, PathPromptOptions, Render, SharedString, Styled, Subscription, WeakEntity, Window,
+    KeyBinding, ParentElement, PathPromptOptions, Render, SharedString, Styled, Subscription, Task, WeakEntity, Window,
     WindowBounds, WindowOptions, actions,
     assets::IconName,
     component::{
@@ -56,6 +58,8 @@ actions!(
         ToggleTheme,
         UseEnglish,
         UseJapanese,
+        OpenSettings,
+        OpenWorkspaceSettings,
     ]
 );
 
@@ -74,13 +78,23 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-p", FindFile, Some(CONTEXT)),
         KeyBinding::new("ctrl-w", CloseActiveEditor, Some(CONTEXT)),
         KeyBinding::new("ctrl-s", SaveActiveEditor, Some(CONTEXT)),
+        KeyBinding::new("ctrl-,", OpenSettings, Some(CONTEXT)),
         KeyBinding::new("ctrl-q", Quit, None),
     ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
 }
 
 /// メインウィンドウを開く。`paths` はフォルダかファイル（起動時の引数）。
+/// 設定を読み込んで反映する（ウィンドウを開く前に呼ぶ）。読めなかった層のエラーを返す。
+pub fn init_settings(cx: &mut App) -> Vec<String> {
+    settings_sync::init(cx)
+}
+
+/// メインウィンドウを開く。`paths` が空なら、設定に従って前回のセッションを復元する。
 pub fn open_main_window(paths: Vec<PathBuf>, cx: &mut App) -> anyhow::Result<()> {
+    let session = (paths.is_empty() && settings::ActiveSettings::get(cx).restore_session)
+        .then(session::load)
+        .flatten();
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::centered(None, size(px(1440.), px(900.)), cx)),
         window_min_size: Some(size(px(800.), px(500.))),
@@ -92,6 +106,10 @@ pub fn open_main_window(paths: Vec<PathBuf>, cx: &mut App) -> anyhow::Result<()>
             for p in paths {
                 ws.open_path(p, window, cx);
             }
+            if let Some(session) = session {
+                ws.restore_session(session, window, cx);
+            }
+            ws.watch_settings(window, cx);
             ws
         })
     })?;
@@ -109,6 +127,15 @@ pub struct Workspace {
     indexing: bool,
     /// 未保存の確認に答えた後は、ウィンドウを閉じる要求をそのまま通す。
     close_confirmed: bool,
+    /// 開いているファイル（タブを開いた順。セッションの保存用）。
+    open_order: Vec<PathBuf>,
+    /// 読み込み中のファイル（同じファイルを二重に開かないため）。
+    loading: HashSet<PathBuf>,
+    /// セッション復元で最後にアクティブにするファイル。
+    pending_active: Option<PathBuf>,
+    last_saved_session: Option<session::Session>,
+    settings_watcher: Option<project::DirWatcher>,
+    _settings_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -186,6 +213,12 @@ impl Workspace {
             file_index: None,
             indexing: false,
             close_confirmed: false,
+            open_order: Vec::new(),
+            loading: HashSet::new(),
+            pending_active: None,
+            last_saved_session: None,
+            settings_watcher: None,
+            _settings_task: None,
             _subscriptions: subs,
         }
     }
@@ -194,6 +227,9 @@ impl Workspace {
         let path = path.canonicalize().unwrap_or(path);
         if path.is_dir() {
             self.project.update(cx, |p, cx| p.set_root(path, cx));
+            self.file_index = None;
+            self.watch_settings(window, cx);
+            self.save_session(cx);
         } else {
             if self.project.read(cx).root().is_none()
                 && let Some(parent) = path.parent()
@@ -231,25 +267,39 @@ impl Workspace {
             focus.focus(window, cx);
             return;
         }
+        if !self.loading.insert(path.clone()) {
+            return;
+        }
         let load = {
             let path = path.clone();
             cx.background_spawn(async move { editor::file::load(&path) })
         };
         cx.spawn_in(window, async move |this, cx| {
             let result = load.await;
-            this.update_in(cx, |this, window, cx| match result {
-                Ok(loaded) => this.add_editor(path, loaded, window, cx),
-                Err(e) => {
-                    let file = display_name(&path);
-                    let msg = match e {
-                        LoadError::Binary => cx.t_args("core.notify.binary", &[("file", file.into())]),
-                        LoadError::TooLarge(_) => cx.t_args("core.notify.too-large", &[("file", file.into())]),
-                        LoadError::Io(e) => cx.t_args(
-                            "core.notify.open-failed",
-                            &[("file", file.into()), ("error", e.to_string().into())],
-                        ),
-                    };
-                    window.push_notification(Notification::error(msg), cx);
+            this.update_in(cx, |this, window, cx| {
+                this.loading.remove(&path);
+                if this.loading.is_empty() {
+                    // 復元中に読み込んだファイルがすべてそろったら、前回アクティブだったタブを選ぶ。
+                    if let Some(active) = this.pending_active.take()
+                        && active != path
+                    {
+                        this.open_file(active, window, cx);
+                    }
+                }
+                match result {
+                    Ok(loaded) => this.add_editor(path, loaded, window, cx),
+                    Err(e) => {
+                        let file = display_name(&path);
+                        let msg = match e {
+                            LoadError::Binary => cx.t_args("core.notify.binary", &[("file", file.into())]),
+                            LoadError::TooLarge(_) => cx.t_args("core.notify.too-large", &[("file", file.into())]),
+                            LoadError::Io(e) => cx.t_args(
+                                "core.notify.open-failed",
+                                &[("file", file.into()), ("error", e.to_string().into())],
+                            ),
+                        };
+                        window.push_notification(Notification::error(msg), cx);
+                    }
                 }
             })
             .ok();
@@ -281,13 +331,16 @@ impl Workspace {
                 }
             }),
         );
-        self.editors.insert(path, weak.clone());
+        self.editors.insert(path.clone(), weak.clone());
+        self.open_order.retain(|p| *p != path);
+        self.open_order.push(path);
         self.active = Some(weak);
         self.dock_area.update(cx, |area, cx| {
             area.add_panel_view(panel_handle(panel.clone()), DockPlacement::Center, None, window, cx)
         });
         let focus = panel.read(cx).focus_handle(cx);
         focus.focus(window, cx);
+        self.save_session(cx);
         cx.notify();
     }
 
@@ -490,6 +543,10 @@ impl Render for Workspace {
                 cx.listener(|_, _: &UseJapanese, _, cx| i18n::set_language("ja".parse().expect("valid tag"), cx)),
             )
             .on_action(cx.listener(|this, _: &Quit, window, cx| this.quit(window, cx)))
+            .on_action(cx.listener(|this, _: &OpenSettings, window, cx| this.open_user_settings(window, cx)))
+            .on_action(
+                cx.listener(|this, _: &OpenWorkspaceSettings, window, cx| this.open_workspace_settings(window, cx)),
+            )
             .relative()
             .size_full()
             .bg(cx.token(Token::Background))

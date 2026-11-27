@@ -18,6 +18,9 @@ fn main() {
             theme::init(theme::Mode::Dark, cx);
             i18n::init(i18n::detect_language(), cx);
             workspace::init(cx);
+            for e in workspace::init_settings(cx) {
+                log::error!("設定を反映できなかった: {e}");
+            }
 
             let paths = std::env::args_os().skip(1).map(std::path::PathBuf::from).collect();
             if let Err(e) = workspace::open_main_window(paths, cx) {

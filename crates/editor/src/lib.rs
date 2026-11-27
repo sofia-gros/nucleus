@@ -81,6 +81,10 @@ impl EditorPanel {
             }),
             // カーソル移動も含め、エディタの状態が変わったらステータスバーへ伝える。
             cx.observe(&state, |_, _, cx| cx.emit(EditorEvent::Changed)),
+            // 設定が変わったら、開いているエディタにもすぐ反映する。
+            cx.observe_global_in::<settings::ActiveSettings>(window, |this, window, cx| {
+                this.apply_settings(window, cx)
+            }),
         ];
         EditorPanel {
             path,
@@ -151,6 +155,22 @@ impl EditorPanel {
             .ok();
             result
         })
+    }
+
+    fn apply_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let s = settings::ActiveSettings::get(cx).editor.clone();
+        self.state.update(cx, |state, cx| {
+            state.set_tab_size(
+                TabSize {
+                    tab_size: s.tab_size,
+                    hard_tabs: s.hard_tabs,
+                },
+                cx,
+            );
+            state.set_soft_wrap(s.soft_wrap, window, cx);
+            state.set_line_number(s.line_numbers, window, cx);
+            state.set_indent_guides(s.indent_guides, window, cx);
+        });
     }
 
     pub fn is_saving(&self) -> bool {

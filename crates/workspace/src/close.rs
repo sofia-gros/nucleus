@@ -18,10 +18,12 @@ impl Workspace {
     /// 未保存のファイルがあれば確認する。確認中は閉じない（false）。
     pub(crate) fn should_close_window(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if self.close_confirmed {
+            self.save_session_now(cx);
             return true;
         }
         let dirty = self.dirty_editors(cx);
         if dirty.is_empty() {
+            self.save_session_now(cx);
             return true;
         }
         let message = if dirty.len() == 1 {
@@ -64,8 +66,9 @@ impl Workspace {
                     return; // 保存に失敗したら閉じない（通知はワークスペースが出す）。
                 }
             }
-            this.update_in(cx, |this, window, _| {
+            this.update_in(cx, |this, window, cx| {
                 this.close_confirmed = true;
+                this.save_session_now(cx);
                 window.remove_window();
             })
             .ok();
@@ -121,6 +124,7 @@ impl Workspace {
     pub(crate) fn remove_editor(&mut self, editor: Entity<EditorPanel>, window: &mut Window, cx: &mut Context<Self>) {
         let path = editor.read(cx).path().to_path_buf();
         self.editors.remove(&path);
+        self.open_order.retain(|p| *p != path);
         if self
             .active
             .as_ref()
