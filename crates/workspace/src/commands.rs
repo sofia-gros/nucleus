@@ -4,9 +4,9 @@
 use gpui_kit::{Action, assets::IconName};
 
 use crate::{
-    CloseActiveEditor, CommandPalette, FindFile, OpenFolder, OpenSettings, OpenWorkspaceSettings, Quit,
-    SaveActiveEditor, SearchInActiveEditor, ToggleBottomDock, ToggleLeftDock, ToggleRightDock, ToggleTheme, UseEnglish,
-    UseJapanese,
+    CloseActiveEditor, CommandPalette, FindFile, NewTerminal, OpenFolder, OpenSettings, OpenWorkspaceSettings, Quit,
+    SaveActiveEditor, SearchInActiveEditor, ToggleBottomDock, ToggleLeftDock, ToggleRightDock, ToggleTerminal,
+    ToggleTheme, UseEnglish, UseJapanese,
 };
 
 pub struct CommandDef {
@@ -33,6 +33,12 @@ pub fn all() -> Vec<CommandDef> {
             Box::new(SearchInActiveEditor)
         }),
         c("core.command.close-tab", IconName::X, || Box::new(CloseActiveEditor)),
+        c("core.command.toggle-terminal", IconName::Terminal, || {
+            Box::new(ToggleTerminal)
+        }),
+        c("core.command.new-terminal", IconName::Terminal, || {
+            Box::new(NewTerminal)
+        }),
         c("core.command.toggle-left-dock", IconName::PanelLeft, || {
             Box::new(ToggleLeftDock)
         }),

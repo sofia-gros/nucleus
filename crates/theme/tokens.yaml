@@ -109,3 +109,24 @@
 - { key: highlight.syntax.tag,          doc: "タグ（HTML など）" }
 - { key: highlight.syntax.label,        doc: "ラベル・ライフタイム" }
 - { key: highlight.syntax.preproc,      doc: "プリプロセッサ・マクロ" }
+
+# --- terminal（ANSI の 16 色。256 色の残りは theme::ansi_color が計算する） ---
+- { key: terminal.background, doc: "ターミナルの背景", gpui: false }
+- { key: terminal.foreground, doc: "ターミナルの文字色", gpui: false }
+- { key: terminal.cursor, doc: "ターミナルのカーソル", gpui: false }
+- { key: terminal.ansi.black, doc: "ANSI 標準 black", gpui: false }
+- { key: terminal.ansi.red, doc: "ANSI 標準 red", gpui: false }
+- { key: terminal.ansi.green, doc: "ANSI 標準 green", gpui: false }
+- { key: terminal.ansi.yellow, doc: "ANSI 標準 yellow", gpui: false }
+- { key: terminal.ansi.blue, doc: "ANSI 標準 blue", gpui: false }
+- { key: terminal.ansi.magenta, doc: "ANSI 標準 magenta", gpui: false }
+- { key: terminal.ansi.cyan, doc: "ANSI 標準 cyan", gpui: false }
+- { key: terminal.ansi.white, doc: "ANSI 標準 white", gpui: false }
+- { key: terminal.ansi.bright_black, doc: "ANSI 明るい black", gpui: false }
+- { key: terminal.ansi.bright_red, doc: "ANSI 明るい red", gpui: false }
+- { key: terminal.ansi.bright_green, doc: "ANSI 明るい green", gpui: false }
+- { key: terminal.ansi.bright_yellow, doc: "ANSI 明るい yellow", gpui: false }
+- { key: terminal.ansi.bright_blue, doc: "ANSI 明るい blue", gpui: false }
+- { key: terminal.ansi.bright_magenta, doc: "ANSI 明るい magenta", gpui: false }
+- { key: terminal.ansi.bright_cyan, doc: "ANSI 明るい cyan", gpui: false }
+- { key: terminal.ansi.bright_white, doc: "ANSI 明るい white", gpui: false }

@@ -17,7 +17,7 @@ use gpui_kit::{App, AppContext as _};
 pub use color::Color;
 pub use ext::{ExtTokenDecl, ExtTokenId, ExtTokenSet, TokenKind};
 pub use file::{Fonts, Mode, ThemeFile, builtin};
-pub use gpui_bridge::{ActiveTheme, TokenColors, install, kit_config_json};
+pub use gpui_bridge::{ActiveTheme, TokenColors, ansi_color, install, kit_config_json, program_color};
 pub use resolve::{Diagnostics, ResolvedTheme, Snapshot, resolve};
 pub use value::ValueExpr;
 

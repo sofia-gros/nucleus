@@ -113,3 +113,9 @@ core-find-find = 検索
 core-find-replace = 置換
 core-find-replace-all = すべて置換
 core-find-case-sensitive = 大文字と小文字を区別
+
+## ターミナル
+core-terminal-exited = プロセスが終了しました。Enter で再起動します。
+core-terminal-spawn-failed = ターミナルを起動できませんでした: { $error }
+core-command-new-terminal = ターミナル: 新しいターミナル
+core-command-toggle-terminal = ターミナル: 表示の切り替え

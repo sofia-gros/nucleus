@@ -118,3 +118,9 @@ core-find-find = Find
 core-find-replace = Replace
 core-find-replace-all = Replace All
 core-find-case-sensitive = Match case
+
+## Terminal
+core-terminal-exited = Process exited. Press Enter to restart.
+core-terminal-spawn-failed = Could not start the terminal: { $error }
+core-command-new-terminal = Terminal: New Terminal
+core-command-toggle-terminal = Terminal: Toggle Terminal

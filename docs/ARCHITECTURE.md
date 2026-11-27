@@ -42,7 +42,7 @@
 | `workspace` | レイアウト（Dock）、タブ、パネル、StatusBar、TitleBar、コマンドパレット、拡張用スロット |
 | `editor` | gpui-kit の code editor を包むもの（Document、保存、検索バー、装飾） |
 | `project` | Worktree（`ignore` によるバックグラウンド走査と `notify` による差分更新）、ファイル検索、全文検索 |
-| `terminal` | `alacritty_terminal` + `portable-pty`、グリッドの描画 |
+| `terminal` | `alacritty_terminal`（VT の解釈と PTY）、グリッドの描画 |
 | `lsp` | LSP クライアント（言語ごとにサーバー1つ、非同期） |
 | `settings` | 階層化した設定（既定 / ユーザー / ワークスペース）、ホットリロード |
 | `extension_host` | マニフェスト、権限、起動の流れ、wasmtime |
@@ -249,7 +249,7 @@ l10n: l10n/                  # l10n/core.ftl, l10n/anthropic.claude.ftl …
 - **Editor:** gpui-kit の code editor（tree-sitter の差分ハイライト、補完・ホバーの土台）を使う。Nucleus 側は Document（パス、保存済みの版、改行コード、エンコーディング）だけを持つ。保存は Rope のスナップショットをバックグラウンドで書き出す。
 - **Project:** フォルダは展開されたときに直下だけをバックグラウンドで読む（`ignore` で `.gitignore` を反映）。監視も読み込み済みのフォルダだけを再帰なしで行い（`notify`）、変更があったフォルダだけを読み直す。ツリーは `uniform_list` で、画面に見えている行だけを描く。描画中にファイルの状態を問い合わせる（`stat`）ことはしない。
 - **Search:** `grep-searcher` + `ignore` で、結果を少しずつ UI に流す。
-- **Terminal:** `alacritty_terminal` + `portable-pty`。出力は1フレームにまとめて反映する。
+- **Terminal:** `alacritty_terminal` の VT 解釈と PTY（Windows は ConPTY）を使う。PTY の読み書きは alacritty の EventLoop が専用スレッドで行い、UI には更新の通知だけが届く（届いた分をまとめて1回描く）。描画は見えている行だけを、同じ見た目の文字をまとめて行う。全角文字は2マス幅に固定する。色は ANSI 16色と既定色をテーマの Token（`terminal.*`）から取り、256色の残りとプログラムが指定した 24bit 色は `theme` クレートの関数で変換する。
 - **LSP:** Core のクライアントとして実装する。どのサーバーをどう起動するかは、Extension（`language` 権限）が返す。
 - **Settings:** 既定 / ユーザー / ワークスペースの3層。JSON とスキーマで検証し、ホットリロードする。設定画面の項目名と説明も i18n キーで持つ。
 
@@ -277,7 +277,10 @@ l10n: l10n/                  # l10n/core.ftl, l10n/anthropic.claude.ftl …
    - 設定は 既定 → ユーザー → フォルダ の3層の JSON（コメント可）。保存すると即座に反映する（テーマ、表示言語、エディタのフォントとタブ幅など）。キーバインドは設定の `keymap` で足せる（反映は再起動後。gpui のキーバインドは個別に外せないため）。
    - セッション（開いていたフォルダ・ファイル・ドックの状態）を保存し、次回の起動で復元する。gpui-kit の `DockArea::load` は使わず、Nucleus 独自の形式で持つ。
    - 検索と置換は Atom 式の下部パネル（`Ctrl+F` / `Ctrl+H`、`F3` / `Shift+F3`）。gpui-kit エディタの検索エンジンが対応していないため、正規表現と単語単位の検索は未対応（大文字小文字の区別のみ）。
-4. **P3 端末:** Terminal（下ドック）
+4. **P3 端末:** Terminal（下ドック） — **完了**
+   - シェルを最初に表示したときに起動（アプリの起動時間に影響させない）。複数のターミナル（`Ctrl+Shift+T`）、表示の切り替え（`Ctrl+`` ` ``）、スクロールバック 10,000 行、ブラケットペースト、終了後の再起動。
+   - シェルで使う `Ctrl+B` / `Ctrl+P` / `Ctrl+W` などは、ターミナル内ではワークスペースのショートカットにせずシェルへ渡す。
+   - 未対応: マウスでの選択とコピー、マウス入力の転送（vim などのマウス操作）、ターミナル内での IME 変換（変換確定後の文字は入る）。
 5. **P4 Extension 基盤:** マニフェストと権限、起動の流れ、データ系の権限（テーマ・言語パック・文法）
 6. **P5 WASM:** `core@1` の API、コマンド、言語サーバーの起動設定 → LSP
 7. **P6 UI API:** `ui@1`、`ui_bridge`、スロット → 公式の Git Extension を UI 付きで作る

@@ -98,7 +98,7 @@ pub struct Snapshot {
 
 impl Snapshot {
     /// Token の構成が変わったら上げる（古いキャッシュを捨てるため）。
-    pub const VERSION: u32 = 1;
+    pub const VERSION: u32 = 2;
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]

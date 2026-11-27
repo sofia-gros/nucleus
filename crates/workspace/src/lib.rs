@@ -60,6 +60,8 @@ actions!(
         UseJapanese,
         OpenSettings,
         OpenWorkspaceSettings,
+        NewTerminal,
+        ToggleTerminal,
     ]
 );
 
@@ -68,6 +70,7 @@ const CONTEXT: &str = "Workspace";
 pub fn init(cx: &mut App) {
     editor::init(cx);
     prompt::init(cx);
+    terminal::init(cx);
     cx.bind_keys([
         KeyBinding::new("ctrl-b", ToggleLeftDock, Some(CONTEXT)),
         KeyBinding::new("ctrl-j", ToggleBottomDock, Some(CONTEXT)),
@@ -79,6 +82,10 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-w", CloseActiveEditor, Some(CONTEXT)),
         KeyBinding::new("ctrl-s", SaveActiveEditor, Some(CONTEXT)),
         KeyBinding::new("ctrl-,", OpenSettings, Some(CONTEXT)),
+        KeyBinding::new("ctrl-`", ToggleTerminal, Some(CONTEXT)),
+        KeyBinding::new("ctrl-shift-`", NewTerminal, Some(CONTEXT)),
+        KeyBinding::new("ctrl-~", NewTerminal, Some(CONTEXT)),
+        KeyBinding::new("ctrl-shift-t", NewTerminal, Some(CONTEXT)),
         KeyBinding::new("ctrl-q", Quit, None),
     ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
@@ -127,6 +134,7 @@ pub struct Workspace {
     indexing: bool,
     /// 未保存の確認に答えた後は、ウィンドウを閉じる要求をそのまま通す。
     close_confirmed: bool,
+    terminals: Vec<WeakEntity<terminal::TerminalView>>,
     /// 開いているファイル（タブを開いた順。セッションの保存用）。
     open_order: Vec<PathBuf>,
     /// 読み込み中のファイル（同じファイルを二重に開かないため）。
@@ -145,13 +153,16 @@ impl Workspace {
         let project_handle = panel_handle(project.clone());
         let panel = |kind, cx: &mut Context<DockArea>| panel_handle(cx.new(|cx| CorePanel::new(kind, cx)));
         let mut skin_handle = None;
+        let mut first_terminal = None;
         let dock_area = cx.new(|cx| {
             let skin = DockSkin::new(cx);
             skin_handle = Some(skin.clone());
             let mut area = DockArea::new("nucleus.workspace", Some(1), window, cx).with_renderer(skin);
             let search = panel(PanelKind::Search, cx);
             let welcome = panel(PanelKind::Welcome, cx);
-            let terminal = panel(PanelKind::Terminal, cx);
+            let terminal_view = cx.new(|cx| terminal::TerminalView::new(None, cx));
+            first_terminal = Some(terminal_view.downgrade());
+            let terminal = panel_handle(terminal_view);
             let problems = panel(PanelKind::Problems, cx);
             let output = panel(PanelKind::Output, cx);
             let git = panel(PanelKind::Git, cx);
@@ -213,6 +224,7 @@ impl Workspace {
             file_index: None,
             indexing: false,
             close_confirmed: false,
+            terminals: first_terminal.into_iter().collect(),
             open_order: Vec::new(),
             loading: HashSet::new(),
             pending_active: None,
@@ -226,7 +238,10 @@ impl Workspace {
     pub fn open_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         let path = path.canonicalize().unwrap_or(path);
         if path.is_dir() {
-            self.project.update(cx, |p, cx| p.set_root(path, cx));
+            self.project.update(cx, |p, cx| p.set_root(path.clone(), cx));
+            for t in self.terminals.iter().filter_map(WeakEntity::upgrade) {
+                t.update(cx, |t, _| t.set_cwd(Some(path.clone())));
+            }
             self.file_index = None;
             self.watch_settings(window, cx);
             self.save_session(cx);
@@ -349,6 +364,50 @@ impl Workspace {
         // 閉じたタブは DockArea から外れている。
         let id = PanelId::from(e.entity_id());
         self.dock_area.read(cx).panel(id).is_some().then_some(e)
+    }
+
+    fn new_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let cwd = self.project.read(cx).root();
+        let view = cx.new(|cx| terminal::TerminalView::new(cwd, cx));
+        self.terminals.retain(|t| t.upgrade().is_some());
+        self.terminals.push(view.downgrade());
+        self.dock_area.update(cx, |area, cx| {
+            area.add_panel_view(panel_handle(view.clone()), DockPlacement::Bottom, None, window, cx);
+            if !area.is_dock_open(DockPlacement::Bottom) {
+                area.toggle_dock(DockPlacement::Bottom, window, cx);
+            }
+        });
+        let focus = view.read(cx).focus_handle(cx);
+        focus.focus(window, cx);
+    }
+
+    /// 下ドックを開いてターミナルにフォーカスする。開いていてターミナルにフォーカスがあれば閉じる。
+    fn toggle_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.terminals.retain(|t| t.upgrade().is_some());
+        let Some(view) = self.terminals.first().and_then(WeakEntity::upgrade) else {
+            self.new_terminal(window, cx);
+            return;
+        };
+        let focus = view.read(cx).focus_handle(cx);
+        let open = self.dock_area.read(cx).is_dock_open(DockPlacement::Bottom);
+        if open && focus.contains_focused(window, cx) {
+            self.toggle(DockPlacement::Bottom, window, cx);
+            if let Some(e) = self.active_editor(cx) {
+                let f = e.read(cx).focus_handle(cx);
+                f.focus(window, cx);
+            } else {
+                self.focus.focus(window, cx);
+            }
+            return;
+        }
+        let id = PanelId::from(view.entity_id());
+        self.dock_area.update(cx, |area, cx| {
+            if !area.is_dock_open(DockPlacement::Bottom) {
+                area.toggle_dock(DockPlacement::Bottom, window, cx);
+            }
+            area.select_panel(id, window, cx);
+        });
+        focus.focus(window, cx);
     }
 
     fn toggle(&mut self, placement: DockPlacement, window: &mut Window, cx: &mut Context<Self>) {
@@ -544,6 +603,8 @@ impl Render for Workspace {
             )
             .on_action(cx.listener(|this, _: &Quit, window, cx| this.quit(window, cx)))
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| this.open_user_settings(window, cx)))
+            .on_action(cx.listener(|this, _: &NewTerminal, window, cx| this.new_terminal(window, cx)))
+            .on_action(cx.listener(|this, _: &ToggleTerminal, window, cx| this.toggle_terminal(window, cx)))
             .on_action(
                 cx.listener(|this, _: &OpenWorkspaceSettings, window, cx| this.open_workspace_settings(window, cx)),
             )

@@ -17,6 +17,7 @@ Core は小さく速く保ち、機能はすべて Extension で足します。
 | `crates/i18n` | Fluent による多言語化（英語・日本語、言語パック） |
 | `crates/project` | 開いているフォルダのツリー（遅延読み込み、`.gitignore`、ファイル監視） |
 | `crates/editor` | エディタパネル（gpui-kit の code editor、読み書き、改行コードの保持） |
+| `crates/terminal` | ターミナル（alacritty_terminal、テーマの ANSI 色） |
 | `crates/settings` | 設定（既定 / ユーザー / フォルダの3層、コメント付き JSON） |
 | `crates/workspace` | メインウィンドウ（TitleBar / DockArea / StatusBar）、パネル、コマンドパレット、ファイル検索、セッション |
 
@@ -47,6 +48,8 @@ cargo run -p nucleus -- path/to/project
 | `Ctrl+W` | タブを閉じる |
 | `Ctrl+F` / `Ctrl+H` | ファイル内を検索 / 置換（`F3` / `Shift+F3` で次 / 前） |
 | `Ctrl+,` | 設定ファイルを開く |
+| `Ctrl+`` ` `` / `Ctrl+Shift+T` | ターミナルの表示切り替え / 新しいターミナル |
+| `Ctrl+Shift+V`（ターミナル内） | 貼り付け |
 | `Ctrl+B` / `Ctrl+J` / `Ctrl+Alt+B` | 左 / 下 / 右のドックを開閉 |
 | `Ctrl+Q` | 終了 |
 

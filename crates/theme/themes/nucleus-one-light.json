@@ -1,7 +1,11 @@
 {
   "name": "Nucleus One Light",
   "mode": "light",
-  "fonts": { "ui": "Inter", "mono": "JetBrains Mono", "mono_size": 13 },
+  "fonts": {
+    "ui": "Inter",
+    "mono": "JetBrains Mono",
+    "mono_size": 13
+  },
   "colors": {
     "background": "#fafafa",
     "foreground": "#383a42",
@@ -29,7 +33,6 @@
     "drop_target.background": "$primary.background/12%",
     "skeleton.background": "#e5e5e6",
     "switch.background": "#d0d0d1",
-
     "danger.background": "#e45649",
     "danger.foreground": "#ffffff",
     "success.background": "#50a14f",
@@ -38,7 +41,6 @@
     "warning.foreground": "#ffffff",
     "info.background": "#0184bc",
     "info.foreground": "#ffffff",
-
     "popover.background": "#ffffff",
     "popover.foreground": "#383a42",
     "list.background": "#f5f5f6",
@@ -67,7 +69,6 @@
     "scrollbar.background": "#00000000",
     "scrollbar.thumb.background": "#4f525e4d",
     "scrollbar.thumb.hover.background": "#4f525e80",
-
     "highlight.editor.background": "$background",
     "highlight.editor.foreground": "$foreground",
     "highlight.editor.active_line.background": "#f0f0f1",
@@ -85,7 +86,6 @@
     "highlight.warning.background": "$highlight.warning/12%",
     "highlight.info": "#4078f2",
     "highlight.hint": "#8e8f96",
-
     "highlight.syntax.keyword": "#a626a4",
     "highlight.syntax.function": "#4078f2",
     "highlight.syntax.string": "#50a14f",
@@ -105,6 +105,25 @@
     "highlight.syntax.punctuation": "#383a42",
     "highlight.syntax.tag": "#e45649",
     "highlight.syntax.label": "#e45649",
-    "highlight.syntax.preproc": "#0184bc"
+    "highlight.syntax.preproc": "#0184bc",
+    "terminal.background": "$background",
+    "terminal.foreground": "$foreground",
+    "terminal.cursor": "$caret",
+    "terminal.ansi.black": "#383a42",
+    "terminal.ansi.red": "#e45649",
+    "terminal.ansi.green": "#50a14f",
+    "terminal.ansi.yellow": "#c18401",
+    "terminal.ansi.blue": "#4078f2",
+    "terminal.ansi.magenta": "#a626a4",
+    "terminal.ansi.cyan": "#0184bc",
+    "terminal.ansi.white": "#a0a1a7",
+    "terminal.ansi.bright_black": "#4f525e",
+    "terminal.ansi.bright_red": "#e06c75",
+    "terminal.ansi.bright_green": "#98c379",
+    "terminal.ansi.bright_yellow": "#d8a13b",
+    "terminal.ansi.bright_blue": "#61afef",
+    "terminal.ansi.bright_magenta": "#c678dd",
+    "terminal.ansi.bright_cyan": "#56b6c2",
+    "terminal.ansi.bright_white": "#ffffff"
   }
 }

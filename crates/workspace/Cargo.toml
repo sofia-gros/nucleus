@@ -13,6 +13,7 @@ theme.workspace = true
 i18n.workspace = true
 project.workspace = true
 editor.workspace = true
+terminal.workspace = true
 settings.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -119,6 +119,46 @@ pub fn install(resolved: Arc<ResolvedTheme>, cx: &mut App) {
     KitTheme::update(cx, |theme| theme.apply_config(&config));
 }
 
+/// ターミナルの 256 色。0〜15 はテーマの Token、16〜231 は 6×6×6 の色立方体、232〜255 は灰色の段階。
+pub fn ansi_color(index: u8, cx: &App) -> Hsla {
+    const ANSI: [Token; 16] = [
+        Token::TerminalAnsiBlack,
+        Token::TerminalAnsiRed,
+        Token::TerminalAnsiGreen,
+        Token::TerminalAnsiYellow,
+        Token::TerminalAnsiBlue,
+        Token::TerminalAnsiMagenta,
+        Token::TerminalAnsiCyan,
+        Token::TerminalAnsiWhite,
+        Token::TerminalAnsiBrightBlack,
+        Token::TerminalAnsiBrightRed,
+        Token::TerminalAnsiBrightGreen,
+        Token::TerminalAnsiBrightYellow,
+        Token::TerminalAnsiBrightBlue,
+        Token::TerminalAnsiBrightMagenta,
+        Token::TerminalAnsiBrightCyan,
+        Token::TerminalAnsiBrightWhite,
+    ];
+    match index {
+        0..=15 => cx.token(ANSI[index as usize]),
+        16..=231 => {
+            let i = index - 16;
+            let level = |v: u8| if v == 0 { 0 } else { 55 + v * 40 };
+            program_color(level(i / 36), level((i / 6) % 6), level(i % 6))
+        }
+        _ => {
+            let v = 8 + (index - 232) * 10;
+            program_color(v, v, v)
+        }
+    }
+}
+
+/// 外部プログラム（ターミナルに出力されたエスケープシーケンスなど）が指定した色。
+/// テーマで決められない唯一の例外なので、用途をここに限る。
+pub fn program_color(r: u8, g: u8, b: u8) -> Hsla {
+    Color { r, g, b, a: 255 }.into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
