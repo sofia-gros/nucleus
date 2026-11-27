@@ -1,9 +1,0 @@
-[package]
-name = "git_plugin"
-version = "1.0.0-alpha.1"
-edition = "2024"
-
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]

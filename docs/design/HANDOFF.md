@@ -15,13 +15,9 @@ Figma ファイル: https://www.figma.com/design/JKkYKtCWLklEPo0GYGzPPv （Start
 
 残り: 11 Settings（Editor カテゴリ） / 12 Extensions（Packages） / 13 コンテキストメニュー・通知トースト・未保存ダイアログ / Light テーマ版の全画面
 
-今後は **Penpot**（design.penpot.app）で作り直し、残りの画面を仕上げる。
-
-## Penpot API のメモ
-- 環境「nucleus」で design.penpot.app への接続を許可済み。トークンは環境変数 `PENPOT_TOKEN` に登録してある。
-- `https://design.penpot.app/api/rpc/command/*` は Cloudflare の確認ページで 403 になる。使うのは **`/api/main/methods/<name>`** の方。
-- 認証ヘッダー: `Authorization: Token $PENPOT_TOKEN`。まず `get-profile` を呼び、Anonymous User 以外が返ることを確認する。
-- 旧セッションでは、チャットに貼ったトークンが Anonymous 扱いになった。考えられる原因は、プロキシによる Authorization ヘッダーの除去、またはトークンの無効化。
+デザインツールでの作業はここで終了する（Figma / Penpot ともにこれ以上使わない）。
+以降は **既存の Figma デザインとこのメモを正として、Editor を直接実装する**。
+残りの画面は、実装の中で上記トークン・寸法・既存コンポーネントに従って作る。
 
 ## トークン（Figma 変数名 = gpui-kit ThemeColor のキー。`/` を `.` に読み替える）
 | key | One Dark | One Light |
