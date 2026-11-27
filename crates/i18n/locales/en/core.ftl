@@ -80,8 +80,6 @@ core-command-toggle-left-dock = Toggle Left Dock
 core-command-toggle-bottom-dock = Toggle Bottom Dock
 core-command-toggle-right-dock = Toggle Right Dock
 core-command-toggle-theme = Theme: Toggle Light / Dark
-core-command-language-en = Language: English
-core-command-language-ja = Language: Japanese (日本語)
 core-command-command-palette = Show All Commands
 core-command-quit = Quit
 
@@ -124,3 +122,12 @@ core-terminal-exited = Process exited. Press Enter to restart.
 core-terminal-spawn-failed = Could not start the terminal: { $error }
 core-command-new-terminal = Terminal: New Terminal
 core-command-toggle-terminal = Terminal: Toggle Terminal
+
+## Extensions, themes and languages
+core-status-extensions-starting = Loading extensions…
+core-notify-extension-failed = An extension could not be loaded: { $error }
+core-command-select-theme = Theme: Select Theme…
+core-command-select-language = Display Language: Select…
+core-palette-themes-placeholder = Select a theme…
+core-palette-languages-placeholder = Select the display language…
+core-palette-current = current

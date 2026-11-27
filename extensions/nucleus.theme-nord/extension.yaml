@@ -1,0 +1,11 @@
+# 組み込みのテーマ Extension の例。データだけなので WASM は持たない。
+id: nucleus.theme-nord
+name: Nord Theme
+version: 1.0.0
+publisher: nucleus
+description: An arctic, north-bluish theme (Nord palette) for Nucleus.
+api: { core: 1 }
+permissions:
+  theme: [colors]
+themes:
+  - themes/nord.json

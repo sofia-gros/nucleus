@@ -37,6 +37,7 @@ project = { path = "crates/project" }
 editor = { path = "crates/editor" }
 settings = { path = "crates/settings" }
 terminal = { path = "crates/terminal" }
+extension_host = { path = "crates/extension_host" }
 
 [workspace.lints.clippy]
 disallowed_methods = "deny"

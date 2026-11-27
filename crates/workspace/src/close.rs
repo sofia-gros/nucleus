@@ -1,7 +1,9 @@
 //! タブ・ウィンドウを閉じる流れと、未保存の確認。テーマや表示言語の切り替えもここに置く。
 
 use editor::EditorPanel;
-use gpui_kit::{App, Context, Entity, PromptLevel, Task, WeakEntity, Window, component::dock::PanelId};
+use gpui_kit::{
+    App, AppContext as _, Context, Entity, PromptLevel, Task, WeakEntity, Window, component::dock::PanelId,
+};
 use i18n::Translate as _;
 
 use crate::Workspace;
@@ -146,11 +148,34 @@ impl Workspace {
         }
     }
 
-    pub(crate) fn toggle_theme(&mut self, cx: &mut Context<Self>) {
+    /// Nucleus One の Dark と Light を切り替え、ユーザー設定に書き込む。
+    pub(crate) fn toggle_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mode = match cx.global::<theme::ActiveTheme>().resolved.mode {
             theme::Mode::Dark => theme::Mode::Light,
             theme::Mode::Light => theme::Mode::Dark,
         };
-        theme::apply(&theme::builtin(mode), &theme::ExtTokenSet::default(), cx);
+        self.choose_setting("theme", serde_json::json!(theme::builtin(mode).name), window, cx);
+    }
+
+    /// 設定を書き込み、監視を張り直して反映する（設定ファイルが新しく作られる場合に備える）。
+    pub(crate) fn choose_setting(
+        &mut self,
+        key: &'static str,
+        value: serde_json::Value,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(path) = settings::user_settings_path() else {
+            return;
+        };
+        let write = cx.background_spawn(async move { settings::set_value(&path, key, &value) });
+        cx.spawn_in(window, async move |this, cx| match write.await {
+            Ok(()) => {
+                this.update_in(cx, |this, window, cx| this.watch_settings(window, cx))
+                    .ok();
+            }
+            Err(e) => log::error!("設定を書き込めなかった: {e}"),
+        })
+        .detach();
     }
 }

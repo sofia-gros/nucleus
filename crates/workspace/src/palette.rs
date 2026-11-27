@@ -12,7 +12,9 @@ use gpui_kit::{
         command::{Command, CommandItem, CommandState},
         h_flex,
     },
-    div, px,
+    div,
+    prelude::FluentBuilder as _,
+    px,
 };
 use i18n::Translate as _;
 use theme::{Token, TokenColors as _};
@@ -21,13 +23,78 @@ use crate::{Workspace, commands, finder};
 
 const MAX_RESULTS: usize = 60;
 
+thread_local! {
+    static PALETTE_SEQ: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// テーマ・表示言語の選択肢: (設定に書く値, 表示名, 使用中か)。
+fn choices(kind: PaletteKind, cx: &gpui_kit::App) -> Vec<(String, String, bool)> {
+    match kind {
+        PaletteKind::Themes => {
+            let current = settings::ActiveSettings::get(cx).theme.clone();
+            crate::settings_sync::available_themes(cx)
+                .into_iter()
+                .map(|t| {
+                    let is_current = t.name == current;
+                    (t.name.clone(), t.name, is_current)
+                })
+                .collect()
+        }
+        PaletteKind::Languages => {
+            let current = cx
+                .global::<i18n::I18n>()
+                .localizer
+                .language()
+                .language
+                .as_str()
+                .to_string();
+            let packs: Vec<(String, String)> = extension_host::ExtensionStore::get(cx)
+                .map(|s| {
+                    s.enabled()
+                        .filter_map(|e| {
+                            e.manifest
+                                .locale
+                                .as_ref()
+                                .map(|l| (l.language.clone(), l.label.clone()))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            cx.global::<i18n::I18n>()
+                .catalog
+                .languages()
+                .into_iter()
+                .map(|l| {
+                    let tag = l.to_string();
+                    let label = match tag.as_str() {
+                        "en" => "English".to_string(),
+                        "ja" => "日本語".to_string(),
+                        t => packs
+                            .iter()
+                            .find(|(p, _)| p == t)
+                            .map(|(_, label)| label.clone())
+                            .unwrap_or_else(|| t.to_string()),
+                    };
+                    let is_current = l.language.as_str() == current;
+                    (tag, label, is_current)
+                })
+                .collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum PaletteKind {
     Commands,
     Files,
+    Themes,
+    Languages,
 }
 
 pub struct Palette {
+    /// パレットを開くたびに変わる番号。確定の処理が、別のパレットに効かないようにする。
+    id: u64,
     pub kind: PaletteKind,
     state: Entity<CommandState>,
     prev_focus: Option<FocusHandle>,
@@ -43,10 +110,16 @@ impl Workspace {
             self.close_palette(window, cx);
             return;
         }
+        // パレットから別のパレットを開いた場合は、最初に開く前のフォーカスを引き継ぐ。
+        let prev_focus = match self.palette.take() {
+            Some(old) => old.prev_focus,
+            None => window.focused(cx),
+        };
         let state = cx.new(|cx| CommandState::new(window, cx));
         state.update(cx, |s, cx| s.focus(window, cx));
-        let prev_focus = window.focused(cx);
+        PALETTE_SEQ.with(|n| n.set(n.get() + 1));
         self.palette = Some(Palette {
+            id: PALETTE_SEQ.with(|n| n.get()),
             kind,
             state,
             prev_focus,
@@ -108,6 +181,15 @@ impl Workspace {
                 };
                 cx.notify();
             }
+            PaletteKind::Themes | PaletteKind::Languages => {
+                let labels: Vec<String> = choices(palette.kind, cx).into_iter().map(|c| c.1).collect();
+                palette.matches = if query.trim().is_empty() {
+                    (0..labels.len()).collect()
+                } else {
+                    finder::fuzzy_top(&labels, &query, MAX_RESULTS)
+                };
+                cx.notify();
+            }
             PaletteKind::Files => {
                 let Some(index) = self.file_index.clone() else { return };
                 let task = cx.background_spawn(async move { finder::fuzzy_top(&index, &query, MAX_RESULTS) });
@@ -125,11 +207,25 @@ impl Workspace {
         }
     }
 
-    fn confirm_palette(&mut self, row: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(p) = self.palette.as_ref() else { return };
+    fn confirm_palette(&mut self, id: u64, row: usize, window: &mut Window, cx: &mut Context<Self>) {
+        // コマンドの実行で別のパレットが開いた場合は、そちらを閉じない。
+        let Some(p) = self.palette.as_ref().filter(|p| p.id == id) else {
+            return;
+        };
         let kind = p.kind;
         let Some(&ix) = p.matches.get(row) else { return };
         self.close_palette(window, cx);
+        if matches!(kind, PaletteKind::Themes | PaletteKind::Languages) {
+            if let Some((value, _, _)) = choices(kind, cx).into_iter().nth(ix) {
+                let key = if kind == PaletteKind::Themes {
+                    "theme"
+                } else {
+                    "language"
+                };
+                self.choose_setting(key, serde_json::json!(value), window, cx);
+            }
+            return;
+        }
         if kind == PaletteKind::Files
             && let (Some(index), Some(root)) = (self.file_index.clone(), self.project.read(cx).root())
             && let Some(rel) = index.get(ix)
@@ -152,6 +248,44 @@ impl Workspace {
                             .label(cx.t(c.title_key))
                             .icon(Icon::new(c.icon).text_color(cx.token(Token::MutedForeground)))
                             .action((c.action)())
+                    })
+                    .collect()
+            }
+            PaletteKind::Themes | PaletteKind::Languages => {
+                let all = choices(p.kind, cx);
+                let icon = if p.kind == PaletteKind::Themes {
+                    IconName::Palette
+                } else {
+                    IconName::Languages
+                };
+                p.matches
+                    .iter()
+                    .filter_map(|&i| all.get(i).cloned())
+                    .map(|(_, label, current)| {
+                        let current_label = cx.t("core.palette.current");
+                        CommandItem::new()
+                            .label(SharedString::from(label.clone()))
+                            .child(move |_, cx| {
+                                h_flex()
+                                    .w_full()
+                                    .gap_2()
+                                    .child(Icon::new(icon).small().text_color(cx.token(Token::MutedForeground)))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .text_sm()
+                                            .text_color(cx.token(Token::PopoverForeground))
+                                            .child(label.clone()),
+                                    )
+                                    .when(current, |d| {
+                                        d.child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(cx.token(Token::ListHighlightForeground))
+                                                .child(current_label.clone()),
+                                        )
+                                    })
+                            })
                     })
                     .collect()
             }
@@ -200,6 +334,8 @@ impl Workspace {
         let placeholder = match p.kind {
             PaletteKind::Commands => cx.t("core.palette.commands-placeholder"),
             PaletteKind::Files => cx.t("core.palette.files-placeholder"),
+            PaletteKind::Themes => cx.t("core.palette.themes-placeholder"),
+            PaletteKind::Languages => cx.t("core.palette.languages-placeholder"),
         };
         let empty_key = match (p.kind, self.project.read(cx).root().is_some(), self.indexing) {
             (PaletteKind::Files, false, _) => "core.palette.no-project",
@@ -208,6 +344,7 @@ impl Workspace {
         };
         let empty: SharedString = cx.t(empty_key);
         let (ws1, ws2, ws3) = (ws.clone(), ws.clone(), ws);
+        let palette_id = p.id;
         let command = Command::new(&p.state)
             .items(items)
             .filterable(false)
@@ -228,7 +365,8 @@ impl Workspace {
                 ws1.update(cx, |ws, cx| ws.update_palette_query(q, cx)).ok();
             })
             .on_confirm(move |index, window, cx| {
-                ws2.update(cx, |ws, cx| ws.confirm_palette(index.row, window, cx)).ok();
+                ws2.update(cx, |ws, cx| ws.confirm_palette(palette_id, index.row, window, cx))
+                    .ok();
             })
             .on_cancel(move |window, cx| {
                 ws3.update(cx, |ws, cx| ws.close_palette(window, cx)).ok();

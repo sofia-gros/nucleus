@@ -1,6 +1,7 @@
 //! 設定（docs/ARCHITECTURE.md §7）。既定値 → ユーザー → ワークスペースの順に重ねる。gpui に依存しない。
 
 mod jsonc;
+mod write;
 
 use std::path::{Path, PathBuf};
 
@@ -8,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub use jsonc::strip_comments;
+pub use write::{set_in_text, set_value};
 
 /// 有効な設定（gpui の Global）。変更を受け取りたい側は `cx.observe_global::<ActiveSettings>` を使う。
 #[derive(Clone, Debug, Default)]
@@ -35,6 +37,8 @@ pub struct Settings {
     pub editor: EditorSettings,
     /// 追加のキーバインド（変更は再起動後に反映）。
     pub keymap: Vec<KeymapEntry>,
+    /// 無効にする Extension の ID。
+    pub disabled_extensions: Vec<String>,
 }
 
 impl Default for Settings {
@@ -45,6 +49,7 @@ impl Default for Settings {
             restore_session: true,
             editor: EditorSettings::default(),
             keymap: Vec::new(),
+            disabled_extensions: Vec::new(),
         }
     }
 }

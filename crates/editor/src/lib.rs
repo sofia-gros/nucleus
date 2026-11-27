@@ -23,6 +23,30 @@ use theme::{Token, TokenColors as _};
 
 pub use file::{LineEnding, LoadError, Loaded};
 
+/// Extension（`language` 権限）が足した、ファイルと言語の対応（gpui の Global）。
+#[derive(Clone, Debug, Default)]
+pub struct LanguageOverrides {
+    pub by_extension: std::collections::HashMap<String, String>,
+    pub by_file_name: std::collections::HashMap<String, String>,
+}
+
+impl gpui_kit::Global for LanguageOverrides {}
+
+/// ファイルの言語名。Extension の対応付けを優先し、なければ組み込みの対応を使う。
+pub fn language_for(path: &Path, cx: &App) -> String {
+    if let Some(o) = cx.try_global::<LanguageOverrides>() {
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if let Some(l) = o.by_file_name.get(name) {
+            return l.clone();
+        }
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+        if let Some(l) = o.by_extension.get(&ext) {
+            return l.clone();
+        }
+    }
+    file::language_for(path)
+}
+
 actions!(editor, [Save]);
 
 const CONTEXT: &str = "EditorPanel";
@@ -58,7 +82,7 @@ pub struct EditorPanel {
 
 impl EditorPanel {
     pub fn new(path: PathBuf, loaded: Loaded, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let language: SharedString = file::language_for(&path).into();
+        let language: SharedString = language_for(&path, cx).into();
         let state = cx.new(|cx| {
             EditorState::new(window, cx)
                 .language(language.clone())

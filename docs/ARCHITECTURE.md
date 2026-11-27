@@ -135,7 +135,7 @@ main: claude.wasm              # コードを持たない Extension（テーマ�
 |---|---|---|
 | `theme.colors` / `theme.tokens` / `theme.icons` | 色のセット / 独自 Token / アイコンセット | |
 | `locale.messages` / `locale.pack` | 自分の文言の翻訳 / 言語パック（他の Extension や Core の翻訳） | |
-| `language` | tree-sitter の文法、言語サーバー、フォーマッタ、スニペット | |
+| `language.grammars` / `language.servers` / `language.formatters` | ファイルと言語の対応・文法 / 言語サーバーの起動 / フォーマッタ | `servers` |
 | `editor.read` / `editor.edit` / `editor.decorate` | バッファの読み取り / 編集 / 診断・ヒント・ガター | `edit` |
 | `workspace.fs.read` / `workspace.fs.write` | ワークスペース内のファイル | `write` |
 | `process: [cmd…]` | 外部コマンドの実行（コマンド名を列挙） | ✓ |
@@ -281,7 +281,13 @@ l10n: l10n/                  # l10n/core.ftl, l10n/anthropic.claude.ftl …
    - シェルを最初に表示したときに起動（アプリの起動時間に影響させない）。複数のターミナル（`Ctrl+Shift+T`）、表示の切り替え（`Ctrl+`` ` ``）、スクロールバック 10,000 行、ブラケットペースト、終了後の再起動。
    - シェルで使う `Ctrl+B` / `Ctrl+P` / `Ctrl+W` などは、ターミナル内ではワークスペースのショートカットにせずシェルへ渡す。
    - 未対応: マウスでの選択とコピー、マウス入力の転送（vim などのマウス操作）、ターミナル内での IME 変換（変換確定後の文字は入る）。
-5. **P4 Extension 基盤:** マニフェストと権限、起動の流れ、データ系の権限（テーマ・言語パック・文法）
+5. **P4 Extension 基盤:** マニフェストと権限、起動の流れ、データ系の権限（テーマ・言語パック・文法） — **完了**
+   - `extension_host`: `extension.yaml` の読み込みと検証（未知の権限、宣言していない機能の使用、名前空間の違う Token、ワイルドカードの network / process はエラー）。組み込み（リポジトリの `extensions/` をアプリに埋め込む）とユーザーのもの（`~/.local/share/nucleus/extensions/`）を探す。同じ ID ならユーザーのものを使う。
+   - 段階1（データ系の権限）を起動後にバックグラウンドで読み、UI スレッドで1回だけ反映する: `theme.colors`（テーマ一覧に追加）、`theme.tokens`（拡張 Token）、`locale.messages` / `locale.pack`（Fluent）、`language.grammars`（ファイルと言語の対応）。
+   - テーマ・表示言語はパレットから選べる（`Theme: Select Theme…` / `Display Language: Select…`）。選んだ値はユーザー設定に1行だけ書き込む（コメントは残す）。
+   - 設定 `disabled_extensions` で Extension を無効にできる。
+   - 例: 組み込みのテーマ Extension `extensions/nucleus.theme-nord`、言語パックの例 `examples/extensions/locale-es`。
+   - 未対応: `theme.icons`（アイコンテーマ）、Extension からの tree-sitter 文法の読み込み（文法は今も Core に同梱。対応付けだけ Extension で足せる）。
 6. **P5 WASM:** `core@1` の API、コマンド、言語サーバーの起動設定 → LSP
 7. **P6 UI API:** `ui@1`、`ui_bridge`、スロット → 公式の Git Extension を UI 付きで作る
 8. **P7 仕上げ:** プロジェクト全体検索、Diff、拡張機能の管理画面、Light テーマの調整

@@ -5,8 +5,8 @@ use gpui_kit::{Action, assets::IconName};
 
 use crate::{
     CloseActiveEditor, CommandPalette, FindFile, NewTerminal, OpenFolder, OpenSettings, OpenWorkspaceSettings, Quit,
-    SaveActiveEditor, SearchInActiveEditor, ToggleBottomDock, ToggleLeftDock, ToggleRightDock, ToggleTerminal,
-    ToggleTheme, UseEnglish, UseJapanese,
+    SaveActiveEditor, SearchInActiveEditor, SelectLanguage, SelectTheme, ToggleBottomDock, ToggleLeftDock,
+    ToggleRightDock, ToggleTerminal, ToggleTheme,
 };
 
 pub struct CommandDef {
@@ -55,9 +55,9 @@ pub fn all() -> Vec<CommandDef> {
             Box::new(OpenWorkspaceSettings)
         }),
         c("core.command.toggle-theme", IconName::Palette, || Box::new(ToggleTheme)),
-        c("core.command.language-en", IconName::Languages, || Box::new(UseEnglish)),
-        c("core.command.language-ja", IconName::Languages, || {
-            Box::new(UseJapanese)
+        c("core.command.select-theme", IconName::Palette, || Box::new(SelectTheme)),
+        c("core.command.select-language", IconName::Languages, || {
+            Box::new(SelectLanguage)
         }),
         c("core.command.command-palette", IconName::Command, || {
             Box::new(CommandPalette)

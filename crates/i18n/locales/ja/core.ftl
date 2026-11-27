@@ -75,8 +75,6 @@ core-command-toggle-left-dock = 左ドックの表示切り替え
 core-command-toggle-bottom-dock = 下ドックの表示切り替え
 core-command-toggle-right-dock = 右ドックの表示切り替え
 core-command-toggle-theme = テーマ: ライト / ダークの切り替え
-core-command-language-en = 表示言語: 英語 (English)
-core-command-language-ja = 表示言語: 日本語
 core-command-command-palette = すべてのコマンドを表示
 core-command-quit = 終了
 
@@ -119,3 +117,12 @@ core-terminal-exited = プロセスが終了しました。Enter で再起動し
 core-terminal-spawn-failed = ターミナルを起動できませんでした: { $error }
 core-command-new-terminal = ターミナル: 新しいターミナル
 core-command-toggle-terminal = ターミナル: 表示の切り替え
+
+## 拡張機能・テーマ・表示言語
+core-status-extensions-starting = 拡張機能を読み込み中…
+core-notify-extension-failed = 拡張機能を読み込めませんでした: { $error }
+core-command-select-theme = テーマ: テーマを選択…
+core-command-select-language = 表示言語: 表示言語を選択…
+core-palette-themes-placeholder = テーマを選択…
+core-palette-languages-placeholder = 表示言語を選択…
+core-palette-current = 使用中

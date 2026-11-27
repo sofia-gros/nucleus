@@ -56,8 +56,8 @@ actions!(
         SaveActiveEditor,
         SearchInActiveEditor,
         ToggleTheme,
-        UseEnglish,
-        UseJapanese,
+        SelectTheme,
+        SelectLanguage,
         OpenSettings,
         OpenWorkspaceSettings,
         NewTerminal,
@@ -97,6 +97,14 @@ pub fn init_settings(cx: &mut App) -> Vec<String> {
     settings_sync::init(cx)
 }
 
+/// Extension の読み込み（段階1: データ系の権限）を始める。終わるとテーマや言語の対応付けを反映し直す。
+pub fn start_extensions(cx: &mut App) {
+    let disabled = settings::ActiveSettings::get(cx).disabled_extensions.clone();
+    cx.observe_global::<extension_host::ExtensionStore>(settings_sync::on_extensions_changed)
+        .detach();
+    extension_host::start(disabled, cx);
+}
+
 /// メインウィンドウを開く。`paths` が空なら、設定に従って前回のセッションを復元する。
 pub fn open_main_window(paths: Vec<PathBuf>, cx: &mut App) -> anyhow::Result<()> {
     let session = (paths.is_empty() && settings::ActiveSettings::get(cx).restore_session)
@@ -134,6 +142,7 @@ pub struct Workspace {
     indexing: bool,
     /// 未保存の確認に答えた後は、ウィンドウを閉じる要求をそのまま通す。
     close_confirmed: bool,
+    extension_errors_shown: bool,
     terminals: Vec<WeakEntity<terminal::TerminalView>>,
     /// 開いているファイル（タブを開いた順。セッションの保存用）。
     open_order: Vec<PathBuf>,
@@ -207,6 +216,12 @@ impl Workspace {
                 ProjectPanelEvent::OpenFolderRequested => this.prompt_open_folder(window, cx),
             }),
         ];
+        let mut subs = subs;
+        subs.push(
+            cx.observe_global_in::<extension_host::ExtensionStore>(window, |this, window, cx| {
+                this.on_extensions_loaded(window, cx);
+            }),
+        );
         let focus = cx.focus_handle();
         focus.focus(window, cx);
         let this = cx.entity().downgrade();
@@ -224,6 +239,7 @@ impl Workspace {
             file_index: None,
             indexing: false,
             close_confirmed: false,
+            extension_errors_shown: false,
             terminals: first_terminal.into_iter().collect(),
             open_order: Vec::new(),
             loading: HashSet::new(),
@@ -364,6 +380,26 @@ impl Workspace {
         // 閉じたタブは DockArea から外れている。
         let id = PanelId::from(e.entity_id());
         self.dock_area.read(cx).panel(id).is_some().then_some(e)
+    }
+
+    /// Extension の読み込みが終わったとき: 読めなかったものを通知し、ステータスバーを更新する。
+    fn on_extensions_loaded(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(store) = extension_host::ExtensionStore::get(cx) else {
+            return;
+        };
+        if store.stage == extension_host::Stage::Ready && !self.extension_errors_shown {
+            self.extension_errors_shown = true;
+            let failed: Vec<String> = store
+                .failed
+                .iter()
+                .map(|f| format!("{}: {}", f.location, f.errors.join(" / ")))
+                .collect();
+            for f in failed {
+                let msg = cx.t_args("core.notify.extension-failed", &[("error", f.into())]);
+                window.push_notification(Notification::error(msg), cx);
+            }
+        }
+        cx.notify();
     }
 
     fn new_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -596,11 +632,13 @@ impl Render for Workspace {
                     e.update(cx, |e, cx| e.open_search(window, cx));
                 }
             }))
-            .on_action(cx.listener(|this, _: &ToggleTheme, _, cx| this.toggle_theme(cx)))
-            .on_action(cx.listener(|_, _: &UseEnglish, _, cx| i18n::set_language(i18n::en(), cx)))
+            .on_action(cx.listener(|this, _: &ToggleTheme, window, cx| this.toggle_theme(window, cx)))
             .on_action(
-                cx.listener(|_, _: &UseJapanese, _, cx| i18n::set_language("ja".parse().expect("valid tag"), cx)),
+                cx.listener(|this, _: &SelectTheme, window, cx| this.toggle_palette(PaletteKind::Themes, window, cx)),
             )
+            .on_action(cx.listener(|this, _: &SelectLanguage, window, cx| {
+                this.toggle_palette(PaletteKind::Languages, window, cx)
+            }))
             .on_action(cx.listener(|this, _: &Quit, window, cx| this.quit(window, cx)))
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| this.open_user_settings(window, cx)))
             .on_action(cx.listener(|this, _: &NewTerminal, window, cx| this.new_terminal(window, cx)))

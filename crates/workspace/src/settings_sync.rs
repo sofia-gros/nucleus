@@ -22,12 +22,60 @@ pub fn init(cx: &mut App) -> Vec<String> {
     loaded.errors
 }
 
-/// テーマ名から同梱テーマを選ぶ（Extension のテーマは P4 で加わる）。
-fn theme_file(name: &str) -> Option<theme::ThemeFile> {
-    [theme::Mode::Dark, theme::Mode::Light]
+/// 選べるテーマ（同梱テーマと、Extension が `theme.colors` で提供するもの）。
+pub fn available_themes(cx: &App) -> Vec<theme::ThemeFile> {
+    let mut all: Vec<theme::ThemeFile> = [theme::Mode::Dark, theme::Mode::Light]
         .into_iter()
         .map(theme::builtin)
-        .find(|t| t.name == name)
+        .collect();
+    if let Some(store) = extension_host::ExtensionStore::get(cx) {
+        all.extend(store.themes().cloned());
+    }
+    all
+}
+
+fn theme_file(name: &str, cx: &App) -> Option<theme::ThemeFile> {
+    available_themes(cx).into_iter().find(|t| t.name == name)
+}
+
+/// Extension の読み込みが終わったら、テーマ（拡張 Token を含む）と言語の対応付けを反映し直す。
+pub fn on_extensions_changed(cx: &mut App) {
+    let Some(store) = extension_host::ExtensionStore::get(cx) else {
+        return;
+    };
+    if store.stage != extension_host::Stage::Ready {
+        return;
+    }
+    let overrides = editor::LanguageOverrides {
+        by_extension: store.languages_by_extension.clone(),
+        by_file_name: store.languages_by_file_name.clone(),
+    };
+    cx.set_global(overrides);
+    let s = ActiveSettings::get(cx);
+    apply_theme(&s, cx);
+}
+
+fn apply_theme(s: &Settings, cx: &mut App) {
+    match theme_file(&s.theme, cx) {
+        Some(mut file) => {
+            let mut fonts = file.fonts.clone().unwrap_or_default();
+            fonts.mono = s.editor.font_family.clone();
+            fonts.mono_size = s.editor.font_size;
+            file.fonts = Some(fonts);
+            let tokens = extension_host::ExtensionStore::get(cx)
+                .map(|e| e.tokens.clone())
+                .unwrap_or_default();
+            theme::apply(&file, &tokens, cx);
+        }
+        None => {
+            // Extension の読み込み前は、Extension のテーマはまだ見つからない（読み込み後に反映し直す）。
+            let loading =
+                extension_host::ExtensionStore::get(cx).is_none_or(|e| e.stage != extension_host::Stage::Ready);
+            if !loading {
+                log::warn!("テーマ `{}` が見つからない", s.theme);
+            }
+        }
+    }
 }
 
 /// 設定を反映する。`prev` と同じ項目は触らない（言語の切り替えなどで全画面を描き直さないため）。
@@ -36,16 +84,7 @@ pub fn apply(s: &Settings, prev: Option<&Settings>, cx: &mut App) {
         p.theme != s.theme || p.editor.font_family != s.editor.font_family || p.editor.font_size != s.editor.font_size
     });
     if theme_changed {
-        match theme_file(&s.theme) {
-            Some(mut file) => {
-                let mut fonts = file.fonts.clone().unwrap_or_default();
-                fonts.mono = s.editor.font_family.clone();
-                fonts.mono_size = s.editor.font_size;
-                file.fonts = Some(fonts);
-                theme::apply(&file, &theme::ExtTokenSet::default(), cx);
-            }
-            None => log::warn!("テーマ `{}` が見つからない", s.theme),
-        }
+        apply_theme(s, cx);
     }
     if prev.is_none_or(|p| p.language != s.language) {
         let lang = s

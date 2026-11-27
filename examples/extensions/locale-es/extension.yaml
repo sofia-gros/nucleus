@@ -1,0 +1,13 @@
+# 言語パックの例（同梱はしない）。~/.local/share/nucleus/extensions/ に置くと読み込まれる。
+id: example.locale-es
+name: Español (ejemplo)
+version: 0.1.0
+publisher: example
+description: Example language pack. Untranslated keys fall back to English.
+permissions:
+  locale: [pack]
+l10n: l10n
+locale:
+  language: es
+  label: Español
+  translates: [core]

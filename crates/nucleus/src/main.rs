@@ -21,6 +21,8 @@ fn main() {
             for e in workspace::init_settings(cx) {
                 log::error!("設定を反映できなかった: {e}");
             }
+            // Extension は起動後にバックグラウンドで読み込み、終わったものから反映する（最初のフレームは待たない）。
+            workspace::start_extensions(cx);
 
             let paths = std::env::args_os().skip(1).map(std::path::PathBuf::from).collect();
             if let Err(e) = workspace::open_main_window(paths, cx) {
