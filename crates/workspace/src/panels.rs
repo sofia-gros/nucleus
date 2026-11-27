@@ -1,12 +1,11 @@
-//! ドックに置くパネル。P0 ではプロジェクト（空の状態）、ようこそ、未実装パネルの表示だけ。
+//! ドックに置く Core のパネル（ようこそ、まだ実装していないパネル）。
 
 use gpui_kit::{
     App, Context, EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement, ParentElement, Render,
-    SharedString, Styled, Window,
+    SharedString, StatefulInteractiveElement as _, Styled, Window,
     assets::IconName,
     component::{
         Icon, Sizable as _,
-        button::{Button, ButtonVariants as _},
         dock::{BasePanel, Panel, PanelEvent},
         h_flex, v_flex,
     },
@@ -19,7 +18,6 @@ use theme::{Token, TokenColors as _};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PanelKind {
-    Project,
     Search,
     Welcome,
     Terminal,
@@ -32,7 +30,6 @@ pub enum PanelKind {
 impl PanelKind {
     fn id(self) -> &'static str {
         match self {
-            PanelKind::Project => "nucleus.project",
             PanelKind::Search => "nucleus.search",
             PanelKind::Welcome => "nucleus.welcome",
             PanelKind::Terminal => "nucleus.terminal",
@@ -45,7 +42,6 @@ impl PanelKind {
 
     fn title_key(self) -> &'static str {
         match self {
-            PanelKind::Project => "core.panel.project",
             PanelKind::Search => "core.panel.search",
             PanelKind::Welcome => "core.welcome.tab",
             PanelKind::Terminal => "core.panel.terminal",
@@ -58,7 +54,6 @@ impl PanelKind {
 
     fn icon(self) -> IconName {
         match self {
-            PanelKind::Project => IconName::ListTree,
             PanelKind::Search => IconName::Search,
             PanelKind::Welcome => IconName::Atom,
             PanelKind::Terminal => IconName::Terminal,
@@ -96,13 +91,14 @@ impl BasePanel for CorePanel {
     fn panel_name(&self) -> &'static str {
         self.kind.id()
     }
+
+    /// ドックの基本パネルは閉じられない（ようこそだけ閉じられる）。
+    fn closable(&self, _: &App) -> bool {
+        self.kind == PanelKind::Welcome
+    }
 }
 
 impl Panel for CorePanel {
-    fn tab_name(&self, cx: &App) -> Option<SharedString> {
-        Some(cx.t(self.kind.title_key()))
-    }
-
     fn title(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let color = if self.kind == PanelKind::Welcome {
             cx.token(Token::PrimaryBackground)
@@ -123,45 +119,10 @@ impl Panel for CorePanel {
 impl Render for CorePanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         match self.kind {
-            PanelKind::Project => project_empty(cx).into_any_element(),
             PanelKind::Welcome => welcome(cx).into_any_element(),
             other => coming_soon(other, cx).into_any_element(),
         }
     }
-}
-
-fn project_empty(cx: &App) -> impl IntoElement {
-    v_flex()
-        .size_full()
-        .items_center()
-        .justify_center()
-        .gap_3()
-        .p_6()
-        .bg(cx.token(Token::SidebarBackground))
-        .child(
-            Icon::new(IconName::Folder)
-                .size(px(32.))
-                .text_color(cx.token(Token::MutedForeground)),
-        )
-        .child(
-            div()
-                .text_sm()
-                .font_weight(gpui_kit::FontWeight::MEDIUM)
-                .text_color(cx.token(Token::SidebarForeground))
-                .child(cx.t("core.project.empty-title")),
-        )
-        .child(
-            div()
-                .text_xs()
-                .text_center()
-                .text_color(cx.token(Token::MutedForeground))
-                .child(cx.t("core.project.empty-body")),
-        )
-        .child(
-            Button::new("open-folder")
-                .primary()
-                .label(cx.t("core.project.open-folder")),
-        )
 }
 
 fn coming_soon(kind: PanelKind, cx: &App) -> impl IntoElement {
@@ -249,6 +210,9 @@ fn action_row(
                 .child(cx.t(label_key)),
         )
         .when_some(keys, |d, k| d.child(kbd(k, cx)))
+        .when(id == "w-open", |d| {
+            d.on_click(|_, window, cx| window.dispatch_action(Box::new(crate::OpenFolder), cx))
+        })
 }
 
 fn welcome(cx: &App) -> impl IntoElement {

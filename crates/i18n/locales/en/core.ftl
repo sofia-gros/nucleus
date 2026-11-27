@@ -59,3 +59,13 @@ core-status-extensions-loading =
 
 ## Placeholders for panels that are not implemented yet
 core-panel-coming-soon = { $panel } is not available yet.
+
+## Project tree and files
+core-project-loading = Loading…
+core-project-read-error = Could not read this folder: { $error }
+core-dialog-open-folder = Open Folder
+core-notify-open-failed = Could not open { $file }: { $error }
+core-notify-binary = { $file } looks like a binary file and was not opened.
+core-notify-too-large = { $file } is too large to open.
+core-notify-save-failed = Could not save { $file }: { $error }
+core-status-language-text = Plain Text

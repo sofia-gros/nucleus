@@ -54,3 +54,13 @@ core-status-extensions-loading = 拡張機能を読み込み中（{ $count }件�
 
 ## まだ実装していないパネル
 core-panel-coming-soon = 「{ $panel }」はまだ使えません。
+
+## プロジェクトツリーとファイル
+core-project-loading = 読み込み中…
+core-project-read-error = このフォルダを読めませんでした: { $error }
+core-dialog-open-folder = フォルダを開く
+core-notify-open-failed = { $file } を開けませんでした: { $error }
+core-notify-binary = { $file } はバイナリファイルのようなので開きませんでした。
+core-notify-too-large = { $file } は大きすぎるため開けません。
+core-notify-save-failed = { $file } を保存できませんでした: { $error }
+core-status-language-text = プレーンテキスト

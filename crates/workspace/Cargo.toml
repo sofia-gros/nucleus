@@ -11,6 +11,9 @@ anyhow.workspace = true
 log.workspace = true
 theme.workspace = true
 i18n.workspace = true
+project.workspace = true
+editor.workspace = true
+futures.workspace = true
 
 [lints]
 workspace = true

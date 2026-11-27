@@ -6,7 +6,7 @@ Core は小さく速く保ち、機能はすべて Extension で足します。
 - 設計: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - デザイン（gpui-kit のトークンと Atom One の配色、画面一覧）: [`docs/design/HANDOFF.md`](docs/design/HANDOFF.md)
 
-![Welcome](docs/screenshots/p0-welcome-en.png)
+![Editor](docs/screenshots/p1-editor.png)
 
 ## 構成
 
@@ -15,7 +15,9 @@ Core は小さく速く保ち、機能はすべて Extension で足します。
 | `crates/nucleus` | 起動 |
 | `crates/theme` | Core Token（`tokens.yaml` から生成）、Nucleus One Dark / Light、拡張 Token、gpui-kit への適用 |
 | `crates/i18n` | Fluent による多言語化（英語・日本語、言語パック） |
-| `crates/workspace` | メインウィンドウ（TitleBar / DockArea / StatusBar）とパネル |
+| `crates/project` | 開いているフォルダのツリー（遅延読み込み、`.gitignore`、ファイル監視） |
+| `crates/editor` | エディタパネル（gpui-kit の code editor、読み書き、改行コードの保持） |
+| `crates/workspace` | メインウィンドウ（TitleBar / DockArea / StatusBar）、パネル、ファイルを開く流れ |
 
 ## ビルドと実行
 
@@ -28,6 +30,20 @@ sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev lib
 ```bash
 cargo run -p nucleus
 ```
+
+フォルダやファイルを引数で渡すと、それを開いた状態で起動します。
+
+```bash
+cargo run -p nucleus -- path/to/project
+```
+
+| キー | 操作 |
+|---|---|
+| `Ctrl+O` | フォルダを開く |
+| `Ctrl+S` | 保存 |
+| `Ctrl+F` | ファイル内を検索 |
+| `Ctrl+B` / `Ctrl+J` / `Ctrl+Alt+B` | 左 / 下 / 右のドックを開閉 |
+| `Ctrl+Q` | 終了 |
 
 表示言語は OS の設定に従います。`NUCLEUS_LANG=ja` のように指定して切り替えることもできます。
 

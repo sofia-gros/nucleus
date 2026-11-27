@@ -19,7 +19,8 @@ fn main() {
             i18n::init(i18n::detect_language(), cx);
             workspace::init(cx);
 
-            if let Err(e) = workspace::open_main_window(cx) {
+            let paths = std::env::args_os().skip(1).map(std::path::PathBuf::from).collect();
+            if let Err(e) = workspace::open_main_window(paths, cx) {
                 log::error!("ウィンドウを開けなかった: {e}");
                 cx.quit();
             }

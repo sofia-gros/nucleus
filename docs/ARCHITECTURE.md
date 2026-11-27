@@ -247,7 +247,7 @@ l10n: l10n/                  # l10n/core.ftl, l10n/anthropic.claude.ftl …
 
 ## 7. Core のサブシステム（要点）
 - **Editor:** gpui-kit の code editor（tree-sitter の差分ハイライト、補完・ホバーの土台）を使う。Nucleus 側は Document（パス、保存済みの版、改行コード、エンコーディング）だけを持つ。保存は Rope のスナップショットをバックグラウンドで書き出す。
-- **Project:** `ignore` によるバックグラウンド走査と、`notify` による差分更新。ツリーは `uniform_list` で、画面に見えている行だけを描く。描画中にファイルの状態を問い合わせる（`stat`）ことはしない。
+- **Project:** フォルダは展開されたときに直下だけをバックグラウンドで読む（`ignore` で `.gitignore` を反映）。監視も読み込み済みのフォルダだけを再帰なしで行い（`notify`）、変更があったフォルダだけを読み直す。ツリーは `uniform_list` で、画面に見えている行だけを描く。描画中にファイルの状態を問い合わせる（`stat`）ことはしない。
 - **Search:** `grep-searcher` + `ignore` で、結果を少しずつ UI に流す。
 - **Terminal:** `alacritty_terminal` + `portable-pty`。出力は1フレームにまとめて反映する。
 - **LSP:** Core のクライアントとして実装する。どのサーバーをどう起動するかは、Extension（`language` 権限）が返す。
@@ -268,7 +268,10 @@ l10n: l10n/                  # l10n/core.ftl, l10n/anthropic.claude.ftl …
 
 ## 9. 実装の順番
 1. **P0 基盤:** Cargo workspace、`theme`（Core Token の生成、Nucleus One Dark/Light、キャッシュ）、`i18n`（Fluent、en/ja）、ウィンドウと Workspace の骨格（TitleBar・DockArea・StatusBar） — **完了**（Dock のレイアウトの保存と復元は P2 で行う）
-2. **P1 エディタ:** フォルダを開く、ProjectTree、ファイルを開く・編集・保存、タブ、検索バー
+2. **P1 エディタ:** フォルダを開く、ProjectTree、ファイルを開く・編集・保存、タブ、検索バー — **完了**
+   - 暫定: tree-sitter の文法は今は gpui-kit の機能として Core に同梱している。P4 で `language` 権限の Extension に移す。
+   - 暫定: `Ctrl+F` は gpui-kit 組み込みの検索バー（エディタ上部）。デザインの Atom 式の下部パネル（06 Find & Replace）は P2 で作る。
+   - 未対応: 未保存のタブを閉じるときの確認、開いたファイルをツリーで表示する（reveal）。
 3. **P2 操作系:** コマンドパレット、ファイル検索、設定、キーバインド
 4. **P3 端末:** Terminal（下ドック）
 5. **P4 Extension 基盤:** マニフェストと権限、起動の流れ、データ系の権限（テーマ・言語パック・文法）
