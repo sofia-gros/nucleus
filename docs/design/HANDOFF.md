@@ -15,6 +15,20 @@ Figma ファイル: https://www.figma.com/design/JKkYKtCWLklEPo0GYGzPPv （Start
 
 残り: 11 Settings（Editor カテゴリ） / 12 Extensions（Packages） / 13 コンテキストメニュー・通知トースト・未保存ダイアログ / Light テーマ版の全画面
 
+### 画面の記録（`screens/`、Figma からの書き出し）
+| ファイル | 内容 | 注記 |
+|---|---|---|
+| `01-welcome.png` | Welcome（フォルダ未オープン） | |
+| `02-editor-main.png` | メインのエディタ（1440×900 等倍） | 基準画面 |
+| `04-command-palette.png` | コマンドパレット | 60% 縮小 |
+| `05-file-finder.png` | ファイル検索 | 60% 縮小 |
+| `06-find-replace.png` | 検索と置換（下部パネル） | 60% 縮小 |
+| `07-project-search.png` | プロジェクト検索 | 修正前（パスが折り返す）。正は `07-project-search-left-dock-fixed.png` |
+| `08-git-right-dock.png` | Git（右ドック） | 60% 縮小 |
+| `09-lsp-completion-problems.png` | 補完・診断・Problems | 修正前（詳細が折り返す）。補完メニューの正は `09-lsp-completion-menu-fixed.png` |
+| `10-split-diff.png` | 分割エディタ + Diff | 修正前（Diff の行背景が不透明）。右ペインの正は `10-split-diff-right-pane-fixed.png`（created/deleted.background = 14%） |
+| `components/*.png` | Button / Tab / TreeItem / TitleBar / StatusBar | `tab.png` はコンポーネントセットの枠で上下が切れている |
+
 デザインツールでの作業はここで終了する（Figma / Penpot ともにこれ以上使わない）。
 以降は **既存の Figma デザインとこのメモを正として、Editor を直接実装する**。
 残りの画面は、実装の中で上記トークン・寸法・既存コンポーネントに従って作る。
