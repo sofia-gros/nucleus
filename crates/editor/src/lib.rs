@@ -63,6 +63,8 @@ pub enum EditorEvent {
     Activated,
     /// 未保存かどうか、またはカーソルが変わった。
     Changed,
+    /// テキストが編集された。
+    Edited,
     Saved,
     SaveFailed(String),
 }
@@ -77,6 +79,9 @@ pub struct EditorPanel {
     saved_version: u64,
     saving: bool,
     find_panel: Option<Entity<FindPanel>>,
+    /// テキストが変わるたびに増える番号（言語サーバーとの同期に使う。共有して読む）。
+    edit_version: std::rc::Rc<std::cell::Cell<u64>>,
+    /// 読み込み後に移動する位置（定義へのジャンプで別ファイルを開いたときなど）。
     _subscriptions: Vec<Subscription>,
 }
 
@@ -101,6 +106,8 @@ impl EditorPanel {
                 InputEvent::Change => {
                     let was_dirty = this.is_dirty();
                     this.version += 1;
+                    this.edit_version.set(this.edit_version.get() + 1);
+                    cx.emit(EditorEvent::Edited);
                     if !was_dirty {
                         cx.notify();
                     }
@@ -126,6 +133,7 @@ impl EditorPanel {
             saved_version: 0,
             saving: false,
             find_panel: None,
+            edit_version: Default::default(),
             _subscriptions: subs,
         }
     }
@@ -201,6 +209,35 @@ impl EditorPanel {
             state.set_soft_wrap(s.soft_wrap, window, cx);
             state.set_line_number(s.line_numbers, window, cx);
             state.set_indent_guides(s.indent_guides, window, cx);
+        });
+    }
+
+    pub fn edit_version(&self) -> std::rc::Rc<std::cell::Cell<u64>> {
+        self.edit_version.clone()
+    }
+
+    pub fn state(&self) -> &Entity<EditorState> {
+        &self.state
+    }
+
+    /// 言語サーバーの診断を表示する（波線と、ホバーでの内容）。
+    pub fn set_diagnostics(&mut self, diagnostics: &[lsp_types::Diagnostic], cx: &mut Context<Self>) {
+        self.state.update(cx, |s, cx| {
+            if let Some(set) = s.diagnostics_mut() {
+                set.clear();
+                for d in diagnostics {
+                    set.push(d.clone());
+                }
+            }
+            cx.notify();
+        });
+    }
+
+    /// 指定した位置（行・文字。0 始まり）へ移動してフォーカスする。
+    pub fn go_to(&mut self, position: lsp_types::Position, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.update(cx, |s, cx| {
+            s.set_cursor_position(position, window, cx);
+            s.focus(window, cx);
         });
     }
 

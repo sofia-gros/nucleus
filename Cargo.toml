@@ -38,6 +38,8 @@ editor = { path = "crates/editor" }
 settings = { path = "crates/settings" }
 terminal = { path = "crates/terminal" }
 extension_host = { path = "crates/extension_host" }
+lsp = { path = "crates/lsp" }
+lsp-types = { version = "0.97.0", features = ["proposed"] }
 
 [workspace.lints.clippy]
 disallowed_methods = "deny"

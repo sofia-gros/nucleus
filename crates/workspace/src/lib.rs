@@ -347,6 +347,8 @@ impl Workspace {
                     this.active = Some(panel.downgrade());
                     cx.notify();
                 }
+                // 言語サーバーとの同期は P5 の組み込みで行う（language_support.rs）。
+                EditorEvent::Edited => {}
                 EditorEvent::Changed | EditorEvent::Saved => {
                     if this.active.as_ref().is_some_and(|a| a.entity_id() == panel.entity_id()) {
                         cx.notify();
