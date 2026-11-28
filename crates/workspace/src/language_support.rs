@@ -112,6 +112,8 @@ pub(crate) struct LanguageSupport {
     pub diagnostics: BTreeMap<PathBuf, Vec<lsp_types::Diagnostic>>,
     pub status: BTreeMap<String, ServerStatus>,
     reported_failures: HashSet<String>,
+    /// 出した言語サーバーのメッセージ（同じものを何度も出さない）。
+    shown_messages: HashSet<String>,
     sync_task: Option<Task<()>>,
 }
 
@@ -368,6 +370,10 @@ impl Workspace {
                     return;
                 };
                 let text = format!("{server}: {}", p.message);
+                // サーバーは同じ知らせを何度も送ってくることがある（ファイルを開くたびなど）。1回だけ出す。
+                if !self.lsp.shown_messages.insert(text.clone()) {
+                    return;
+                }
                 let note = match p.typ {
                     lsp_types::MessageType::ERROR => Notification::error(text),
                     lsp_types::MessageType::WARNING => Notification::warning(text),

@@ -451,7 +451,7 @@ impl Workspace {
                 EditorEvent::Saved => {
                     let path = panel.read(cx).path().to_path_buf();
                     this.lsp_saved(&path);
-                    this.refresh_diff_base(&panel, cx);
+                    this.refresh_diff_base(panel, cx);
                     this.extension_file_saved(&path, cx);
                     cx.notify();
                 }
