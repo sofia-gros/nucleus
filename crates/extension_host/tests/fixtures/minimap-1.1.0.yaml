@@ -1,0 +1,26 @@
+# 公式の MiniMap Extension（ソースは extensions-src/minimap）。組み込みではなく sofia-gros/nucleus-extensions から配る。エディタの右側にファイルの全体像を描く。
+id: nucleus.minimap
+name: Minimap
+version: 1.1.0
+publisher: nucleus
+description: A minimap of the whole file beside each editor — as blocks or as real characters. Click or drag to scroll.
+# 1.1.0 は設定（get-setting）と文字の描画（canvas-text）を使う。
+api: { core: 1, ui: 1 }
+permissions:
+  ui: [editor.side]
+  editor: [read]
+contributes:
+  views:
+    - { id: minimap, title: Minimap, location: editor }
+  settings:
+    - key: mode
+      title: Rendering
+      description: Draw the minimap as colored blocks (lighter) or as the actual characters.
+      type: enum
+      options:
+        - { value: blocks, label: Blocks }
+        - { value: text, label: Characters }
+      default: blocks
+  commands:
+    - { id: minimap.toggle, title: "Minimap: Toggle" }
+main: minimap.wasm

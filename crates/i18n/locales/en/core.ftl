@@ -229,3 +229,4 @@ core-status-extension-updates = { $count ->
        *[other] { $count } updates
     }
 core-extensions-updated-notify = { $name } was updated to { $version }.
+core-extensions-number-invalid = Enter a number ({ $range })

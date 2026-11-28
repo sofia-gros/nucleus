@@ -311,3 +311,81 @@ fn minimap_text_mode_follows_the_setting() {
     assert_eq!(first, "fn main() { let x = 1; }");
     assert_eq!(lines[0].spans[0].color, "highlight.syntax.keyword");
 }
+
+/// 1.2.0: 設定 `zoom` で縮図を拡大する（文字が大きくなり、見える行が減る）。
+#[test]
+fn minimap_zoom_scales_the_map() {
+    let manifest = Manifest::from_yaml(MINIMAP_MANIFEST).unwrap();
+    let (host, rx) = HostContext::new();
+    std::thread::spawn(move || {
+        let mut rx = rx;
+        while let Some(req) = block_on(rx.next()) {
+            match req {
+                UiRequest::EditorView { reply, .. } => {
+                    let _ = reply.send(Some(extension_host::EditorViewInfo {
+                        version: 1,
+                        first_line: 0,
+                        last_line: 9,
+                        line_count: 500,
+                        cursor_line: 0,
+                        height: 600.0,
+                    }));
+                }
+                UiRequest::EditorText { reply, .. } => {
+                    let _ = reply.send(Some("let x = 1;\n".repeat(500)));
+                }
+                _ => {}
+            }
+        }
+    });
+    let ctx = host.clone();
+    let (ext, ready) = runtime::spawn(manifest, Arc::from(MINIMAP_WASM), host);
+    block_on(ready).unwrap().expect("activate");
+    let set = |mode: &str, zoom: f64| {
+        let mut s = extension_host::runtime::ExtensionSettings::new();
+        let m = s.entry("nucleus.minimap".into()).or_default();
+        m.insert("mode".into(), serde_json::json!(mode));
+        m.insert("zoom".into(), serde_json::json!(zoom));
+        ctx.set_extension_settings(s);
+    };
+    let canvas_width = |r: &extension_host::runtime::Rendered| {
+        r.nodes
+            .iter()
+            .find_map(|n| match &n.kind {
+                extension_host::ui::Kind::Canvas(c) => Some(c.width),
+                _ => None,
+            })
+            .unwrap()
+    };
+
+    set("text", 1.0);
+    let r1 = block_on(ext.render("minimap@1")).unwrap().unwrap();
+    set("text", 3.0);
+    let r3 = block_on(ext.render("minimap@1")).unwrap().unwrap();
+    let (l1, l3) = (&r1.texts["map"], &r3.texts["map"]);
+    assert!(
+        (l3[0].size / l1[0].size - 3.0).abs() < 0.01,
+        "{} {}",
+        l1[0].size,
+        l3[0].size
+    );
+    // 600px の高さに、1.0 なら 150 行、3.0 なら 50 行。
+    assert_eq!((l1.len(), l3.len()), (151, 51));
+    assert!(canvas_width(&r3) > canvas_width(&r1));
+
+    // 範囲外の値は既定（1.0）に戻る。
+    set("text", 99.0);
+    let r = block_on(ext.render("minimap@1")).unwrap().unwrap();
+    assert_eq!(r.texts["map"][0].size, l1[0].size);
+}
+
+/// 1.1.0 で公開した MiniMap も、そのまま動く。
+#[test]
+fn minimap_1_1_still_loads() {
+    let wasm: &[u8] = include_bytes!("fixtures/minimap-1.1.0.wasm");
+    let manifest = Manifest::from_yaml(include_str!("fixtures/minimap-1.1.0.yaml")).unwrap();
+    assert!(manifest.validate().is_empty());
+    let (host, _rx) = HostContext::new();
+    let (_ext, ready) = runtime::spawn(manifest, Arc::from(wasm), host);
+    block_on(ready).unwrap().expect("1.1.0 activates");
+}

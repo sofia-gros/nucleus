@@ -4,6 +4,8 @@
 //! 表示は設定 `mode` で切り替える（拡張機能の画面の設定、1.1.0）:
 //! - `blocks`: 1 行 2px、1 文字 1px の四角形（軽い）。
 //! - `text`: 実際の文字を小さく描く（1 行 4px、canvas-text を使う）。
+//!
+//! 設定 `zoom`（1.2.0）で縮図そのものを拡大する（既定 1.0）。大きくすると、縮図の上で文字が読める。
 
 use std::{cell::RefCell, collections::HashMap};
 
@@ -33,13 +35,26 @@ impl Mode {
         }
     }
 
-    /// 縮図の幅と 1 行の高さ（px）。
+    /// 縮図の幅と 1 行の高さ（px）。拡大率（設定 `zoom`）を掛ける。幅は広がりすぎないように抑える。
     fn metrics(self) -> (f32, f32) {
-        match self {
+        let z = zoom();
+        let (w, h) = match self {
             Mode::Blocks => (96.0, 2.0),
             Mode::Text => (120.0, 4.0),
-        }
+        };
+        ((w * z).min(MAX_WIDTH), h * z)
     }
+}
+
+/// 縮図の幅の上限（px）。
+const MAX_WIDTH: f32 = 320.0;
+
+/// 拡大率（設定 `zoom`、1.2.0）。既定は 1.0。
+fn zoom() -> f32 {
+    nucleus_extension_api::host::get_setting("zoom")
+        .and_then(|v| v.parse::<f32>().ok())
+        .filter(|z| z.is_finite())
+        .map_or(1.0, |z| z.clamp(0.5, 4.0))
 }
 
 /// 文字の大きさ（text のとき）。等幅で 1 文字はおよそ 0.6 倍の幅になる。
@@ -176,7 +191,15 @@ fn draw(cache: &Cache, v: &host::EditorState, mode: Mode) -> Vec<DrawRect> {
             for (i, line) in visible {
                 let y = (i - first) as f32 * line_h - shift;
                 for &(col, len, class) in line {
-                    out.push(rect(LEFT + col as f32, y, len as f32, line_h - 0.5, class.token(), 0.7));
+                    let z = line_h / 2.0;
+                    out.push(rect(
+                        LEFT + col as f32 * z,
+                        y,
+                        len as f32 * z,
+                        line_h - 0.5 * z,
+                        class.token(),
+                        0.7,
+                    ));
                 }
             }
         }
@@ -188,7 +211,7 @@ fn draw(cache: &Cache, v: &host::EditorState, mode: Mode) -> Vec<DrawRect> {
                     (!spans.is_empty()).then(|| TextLine {
                         x: LEFT,
                         y: (i - first) as f32 * line_h - shift,
-                        size: TEXT_SIZE,
+                        size: TEXT_SIZE * line_h / 4.0,
                         alpha: 0.9,
                         spans,
                     })

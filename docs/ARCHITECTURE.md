@@ -315,6 +315,8 @@ l10n: l10n/                  # l10n/core.ftl, l10n/anthropic.claude.ftl …
    - 拡張機能の画面（`Ctrl+Shift+X`、タイトルバーの Extensions）: 「インストール済み」（有効・無効の切り替え、ユーザーのものはアンインストール、読めなかったものの理由）と「探す」（`index.json` の一覧、検索、インストール・更新）。インストールの前に権限を見せて確認する（強い権限には ⚠）。sha256 と、中の `extension.yaml` の ID・版・権限が一覧と同じかを確かめてから `~/.local/share/nucleus/extensions/<id>/` に入れ、再起動せずに使えるようにする（段階1と段階3をその Extension だけ行う）。アンインストールと有効・無効の切り替えは再起動で反映する。一覧の場所は設定 `extensions_registry` で変えられる。
    - `crates/nucleus-ext`（CLI）: `validate` / `pack` / `index`。
    - API 1.1.0（`nucleus:extension@1.1.0`）: `host.get-setting` と `ui.canvas-text` を足した。**既にある型は変えず、関数と型を足すだけ**にしている（Component Model では、record / variant の形を変えると前の版でビルドした WASM が読み込めなくなる）。1.0.0 でビルドして公開した MiniMap がそのまま動くことをテストで確かめている（`crates/extension_host/tests/fixtures/`）。1.1.0 の関数を使う Extension は、1.0 の Nucleus では起動に失敗する（足りない関数として報告される）。
-   - Extension の設定（`contributes.settings`、`type: enum | boolean`）: 拡張機能の画面の ⚙ で変える。値はユーザー設定の `extension_settings`（`{ "<id>": { "<key>": 値 } }`）に書き、Extension は `get-setting` で読む（未設定なら既定値）。値が変わると、その Extension のビューを描き直す。
+   - Extension の設定（`contributes.settings`、`type: enum | boolean | number`。`number` は `min` / `max` で範囲を決められ、範囲外や数でない入力はエラーを出して書き込まない）: 拡張機能の画面の ⚙ で変える。値はユーザー設定の `extension_settings`（`{ "<id>": { "<key>": 値 } }`）に書き、Extension は `get-setting` で読む（未設定なら既定値）。値が変わると、その Extension のビューを描き直す。
    - 更新の確認: 起動後に一度、ユーザーが入れた Extension（組み込みは除く）の新しい版が一覧にあるか確かめる（設定 `check_extension_updates` で止められる）。あれば通知（「拡張機能を開く」ボタン）とステータスバーの「更新 N 件」を出し、拡張機能の画面に「x に更新」を出す。更新は再起動なしで反映し、動いていた WASM は止めて新しい版を起動し、ビューを描き直す。
    - MiniMap 1.1.0: 設定 `mode` で「Blocks」（1 行 2px の四角形）と「Characters」（実際の文字を 1 行 4px で描く）を切り替える。
+   - MiniMap 1.2.0: 設定 `zoom`（数、既定 1.0、0.5〜4）で縮図そのものを拡大する。行の高さ・文字の大きさ・幅をまとめて掛ける（幅は 320px まで）。2〜3 にすると縮図の上で文字が読める。API は変えていない（値は `get-setting` で読む）が、`type: number` の設定を使うので、これに対応していない Nucleus では読み込めない。
+   - 設定ファイルの書き換え（`settings::set_value`）は、オブジェクトや配列の値（複数行でもよい）も置き換える（以前は1行の値だけで、`extension_settings` が2つ書かれていた）。

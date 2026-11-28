@@ -91,6 +91,8 @@ pub enum SettingKind {
     /// `options` の中から1つ選ぶ。
     Enum,
     Boolean,
+    /// 数（小数も可）。`min` / `max` で範囲を決められる。
+    Number,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -111,6 +113,11 @@ pub struct SettingContribution {
     pub kind: SettingKind,
     #[serde(default)]
     pub options: Vec<SettingOption>,
+    /// `number` の下限と上限。
+    #[serde(default)]
+    pub min: Option<f64>,
+    #[serde(default)]
+    pub max: Option<f64>,
     pub default: serde_json::Value,
 }
 
@@ -120,6 +127,9 @@ impl SettingContribution {
         match self.kind {
             SettingKind::Boolean => v.is_boolean(),
             SettingKind::Enum => v.as_str().is_some_and(|s| self.options.iter().any(|o| o.value == s)),
+            SettingKind::Number => v
+                .as_f64()
+                .is_some_and(|n| n.is_finite() && self.min.is_none_or(|m| n >= m) && self.max.is_none_or(|m| n <= m)),
         }
     }
 }

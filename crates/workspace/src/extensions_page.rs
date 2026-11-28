@@ -57,6 +57,10 @@ pub struct ExtensionsPage {
     installing: HashSet<String>,
     /// 設定を開いている Extension。
     expanded: HashSet<String>,
+    /// 数の設定の入力欄（`<id>/<key>` → 入力欄）。
+    number_inputs: std::collections::HashMap<String, (Entity<InputState>, Subscription)>,
+    /// 正しくない数が入っている設定（`<id>/<key>`）。
+    number_errors: HashSet<String>,
     /// 消したので、再起動すると無くなるもの。
     removed: HashSet<String>,
     _load: Option<Task<()>>,
@@ -102,6 +106,8 @@ impl ExtensionsPage {
             query,
             index,
             expanded: HashSet::new(),
+            number_inputs: Default::default(),
+            number_errors: HashSet::new(),
             installing: HashSet::new(),
             removed: HashSet::new(),
             _load: None,
@@ -269,7 +275,7 @@ impl ExtensionsPage {
         cx.emit(ExtensionsPageEvent::SetDisabled(disabled));
     }
 
-    fn render_installed(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn render_installed(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let Some(store) = ExtensionStore::get(cx) else {
             return Vec::new();
         };
@@ -366,7 +372,7 @@ impl ExtensionsPage {
             }
             out.push(card(m, badges, actions, cx));
             if self.expanded.contains(&id) {
-                out.push(self.settings_form(m, ix, cx));
+                out.push(self.settings_form(m, ix, window, cx));
             }
         }
         for f in failed {
@@ -395,7 +401,57 @@ impl ExtensionsPage {
     }
 
     /// Extension の設定（`contributes.settings`）。選んだ値はユーザー設定の `extension_settings` に書く。
-    fn settings_form(&self, m: &Manifest, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+    /// 数の設定の入力欄（`<id>/<key>` ごとに1つ）。Enter か、欄から離れたときに確かめて書く。
+    fn number_input(
+        &mut self,
+        m: &Manifest,
+        s: &extension_host::manifest::SettingContribution,
+        value: &serde_json::Value,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<InputState> {
+        let slot = format!("{}/{}", m.id, s.key);
+        if let Some((input, _)) = self.number_inputs.get(&slot) {
+            return input.clone();
+        }
+        let text = value.as_f64().map(format_number).unwrap_or_default();
+        let input = cx.new(|cx| InputState::new(window, cx).default_value(text));
+        let (id, decl) = (m.id.clone(), s.clone());
+        let sub = cx.subscribe_in(&input, window, move |this, input, e: &InputEvent, _, cx| {
+            if !matches!(e, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+                return;
+            }
+            let text = input.read(cx).value().trim().to_string();
+            let slot = format!("{id}/{}", decl.key);
+            let parsed = text
+                .parse::<f64>()
+                .ok()
+                .and_then(serde_json::Number::from_f64)
+                .map(serde_json::Value::Number)
+                .filter(|v| decl.accepts(v));
+            match parsed {
+                Some(v) => {
+                    this.number_errors.remove(&slot);
+                    let current = settings::ActiveSettings::get(cx)
+                        .extension_settings
+                        .get(&id)
+                        .and_then(|m| m.get(&decl.key))
+                        .cloned();
+                    if current.as_ref() != Some(&v) {
+                        this.set_setting(&id, &decl.key, v, cx);
+                    }
+                }
+                None => {
+                    this.number_errors.insert(slot);
+                }
+            }
+            cx.notify();
+        });
+        self.number_inputs.insert(slot, (input.clone(), sub));
+        input
+    }
+
+    fn settings_form(&mut self, m: &Manifest, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let current = settings::ActiveSettings::get(cx)
             .extension_settings
             .get(&m.id)
@@ -408,6 +464,41 @@ impl ExtensionsPage {
                 .filter(|v| s.accepts(v))
                 .cloned()
                 .unwrap_or_else(|| s.default.clone());
+            if s.kind == SettingKind::Number {
+                let input = self.number_input(m, s, &value, window, cx);
+                let range = match (s.min, s.max) {
+                    (Some(a), Some(b)) => format!("{} – {}", format_number(a), format_number(b)),
+                    (Some(a), None) => format!("≥ {}", format_number(a)),
+                    (None, Some(b)) => format!("≤ {}", format_number(b)),
+                    (None, None) => String::new(),
+                };
+                let invalid = self.number_errors.contains(&format!("{}/{}", m.id, s.key));
+                rows.push(setting_row(
+                    s,
+                    v_flex()
+                        .items_end()
+                        .gap_0p5()
+                        .child(div().w(px(96.)).child(Input::new(&input).small()))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(if invalid {
+                                    cx.token(Token::HighlightError)
+                                } else {
+                                    cx.token(Token::MutedForeground)
+                                })
+                                .child(if invalid {
+                                    cx.t_args("core.extensions.number-invalid", &[("range", range.into())])
+                                        .to_string()
+                                } else {
+                                    range
+                                }),
+                        )
+                        .into_any_element(),
+                    cx,
+                ));
+                continue;
+            }
             let choices: Vec<(serde_json::Value, String)> = match s.kind {
                 SettingKind::Enum => s
                     .options
@@ -418,6 +509,7 @@ impl ExtensionsPage {
                     (serde_json::Value::Bool(true), cx.t("core.extensions.on").to_string()),
                     (serde_json::Value::Bool(false), cx.t("core.extensions.off").to_string()),
                 ],
+                SettingKind::Number => Vec::new(),
             };
             let buttons: Vec<AnyElement> = choices
                 .into_iter()
@@ -433,27 +525,11 @@ impl ExtensionsPage {
                         .into_any_element()
                 })
                 .collect();
-            rows.push(
-                h_flex()
-                    .gap_4()
-                    .items_start()
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .gap_0p5()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.token(Token::Foreground))
-                                    .child(s.title.clone()),
-                            )
-                            .when_some(s.description.clone(), |d, desc| {
-                                d.child(div().text_xs().text_color(cx.token(Token::MutedForeground)).child(desc))
-                            }),
-                    )
-                    .child(h_flex().gap_1().children(buttons))
-                    .into_any_element(),
-            );
+            rows.push(setting_row(
+                s,
+                h_flex().gap_1().children(buttons).into_any_element(),
+                cx,
+            ));
         }
         v_flex()
             .ml(px(64.))
@@ -554,6 +630,39 @@ impl ExtensionsPage {
             out.push(message(cx.t("core.extensions.empty"), None, cx));
         }
         out
+    }
+}
+
+/// 設定の1行（題・説明と、右側の入力）。
+fn setting_row(s: &extension_host::manifest::SettingContribution, control: AnyElement, cx: &App) -> AnyElement {
+    h_flex()
+        .gap_4()
+        .items_start()
+        .child(
+            v_flex()
+                .flex_1()
+                .gap_0p5()
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.token(Token::Foreground))
+                        .child(s.title.clone()),
+                )
+                .when_some(s.description.clone(), |d, desc| {
+                    d.child(div().text_xs().text_color(cx.token(Token::MutedForeground)).child(desc))
+                }),
+        )
+        .child(control)
+        .into_any_element()
+}
+
+/// 数を短く書く（`1.0`、`1.25`）。
+fn format_number(n: f64) -> String {
+    if n.fract() == 0.0 {
+        format!("{n:.1}")
+    } else {
+        let s = format!("{n:.4}");
+        s.trim_end_matches('0').to_string()
     }
 }
 
@@ -704,7 +813,7 @@ impl Panel for ExtensionsPage {
 }
 
 impl Render for ExtensionsPage {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tab = |id: &'static str, t: Tab, key: &str, current: Tab, cx: &mut Context<Self>| {
             Button::new(id)
                 .small()
@@ -713,7 +822,7 @@ impl Render for ExtensionsPage {
                 .on_click(cx.listener(move |this, _, _, cx| this.set_tab(t, cx)))
         };
         let rows = match self.tab {
-            Tab::Installed => self.render_installed(cx),
+            Tab::Installed => self.render_installed(window, cx),
             Tab::Browse => self.render_browse(cx),
         };
         let current = self.tab;
