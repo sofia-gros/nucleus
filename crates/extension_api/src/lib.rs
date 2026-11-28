@@ -34,6 +34,22 @@ pub use bindings::nucleus::extension::events::WorkspaceEvent;
 pub use bindings::nucleus::extension::host;
 use bindings::nucleus::extension::ui as wit_ui;
 
+/// この Extension の設定（`contributes.settings`）の文字列の値（1.1.0）。
+pub fn setting_str(key: &str) -> Option<String> {
+    let json = host::get_setting(key)?;
+    let s = json.strip_prefix('"')?.strip_suffix('"')?;
+    Some(s.replace("\\\"", "\"").replace("\\\\", "\\"))
+}
+
+/// この Extension の設定の真偽値（1.1.0）。
+pub fn setting_bool(key: &str) -> Option<bool> {
+    match host::get_setting(key)?.as_str() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    }
+}
+
 /// Extension が実装するもの。使わないものは省略できる。
 pub trait Extension {
     fn activate() -> Result<(), String> {

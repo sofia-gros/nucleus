@@ -20,6 +20,10 @@ use gpui_kit::{
 };
 
 use gpui_kit::component::input::RopeExt as _;
+use gpui_kit::component::{
+    Sizable as _,
+    button::{Button, ButtonVariants as _},
+};
 
 use crate::{CONTEXT, Workspace, extension_view::ExtensionPanel};
 
@@ -29,6 +33,13 @@ use crate::{CONTEXT, Workspace, extension_view::ExtensionPanel};
 pub struct RunExtensionCommand {
     pub extension: String,
     pub command: String,
+}
+
+/// 利用者の Extension の設定を、動いている Extension から読めるようにする。値が変わったら true。
+pub fn sync_extension_settings(cx: &App) -> bool {
+    let Some(h) = cx.try_global::<WasmHost>() else { return false };
+    let settings = settings::ActiveSettings::get(cx).extension_settings.clone();
+    h.context.set_extension_settings(settings)
 }
 
 /// 有効な Extension のショートカットを登録する（まだのものだけ）。
@@ -332,11 +343,71 @@ impl Workspace {
                 crate::extensions_page::ExtensionsPageEvent::SetDisabled(list) => {
                     this.choose_setting("disabled_extensions", serde_json::json!(list), window, cx)
                 }
+                crate::extensions_page::ExtensionsPageEvent::SetExtensionSettings(v) => {
+                    this.choose_setting("extension_settings", v.clone(), window, cx)
+                }
             }));
         self.extensions_page = Some(page.downgrade());
         self.dock_area.update(cx, |a, cx| {
             a.add_panel_view(panel_handle(page), DockPlacement::Center, None, window, cx)
         });
+    }
+
+    /// 起動後に一度だけ、入れてある Extension（組み込みを除く）の更新を確かめる。
+    pub(crate) fn check_extension_updates(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let s = settings::ActiveSettings::get(cx);
+        if !s.check_extension_updates {
+            return;
+        }
+        let url = s
+            .extensions_registry
+            .clone()
+            .unwrap_or_else(|| extension_host::registry::DEFAULT_INDEX_URL.to_string());
+        let any_user =
+            extension_host::ExtensionStore::get(cx).is_some_and(|st| st.extensions.iter().any(|e| !e.builtin));
+        if !any_user {
+            return;
+        }
+        let task = cx.background_spawn(async move { extension_host::registry::fetch_index(&url) });
+        cx.spawn_in(window, async move |_, cx| {
+            let index = match task.await {
+                Ok(i) => std::sync::Arc::new(i),
+                Err(e) => {
+                    log::info!("Extension の更新を確かめられなかった: {e}");
+                    return;
+                }
+            };
+            cx.update(|window, cx| {
+                crate::extensions_page::set_index(index, cx);
+                let updates = cx
+                    .try_global::<crate::extensions_page::ExtensionUpdates>()
+                    .map(|u| u.available.clone())
+                    .unwrap_or_default();
+                if updates.is_empty() {
+                    return;
+                }
+                let list = updates
+                    .iter()
+                    .map(|u| format!("{} {} → {}", u.name, u.from, u.to))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let msg = cx.t_args(
+                    "core.extensions.updates-available",
+                    &[("count", updates.len().into()), ("list", list.into())],
+                );
+                let open = cx.t("core.extensions.open");
+                let n = Notification::info(msg).action(move |_, _, _| {
+                    Button::new("open-extensions")
+                        .small()
+                        .primary()
+                        .label(open.clone())
+                        .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::OpenExtensions), cx))
+                });
+                window.push_notification(n, cx);
+            })
+            .ok();
+        })
+        .detach();
     }
 
     pub(crate) fn run_extension_command(

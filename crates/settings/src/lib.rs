@@ -41,6 +41,10 @@ pub struct Settings {
     pub disabled_extensions: Vec<String>,
     /// Extension の一覧（index.json）の場所。null なら公式（sofia-gros/nucleus-extensions）。
     pub extensions_registry: Option<String>,
+    /// 起動時に Extension の更新を確かめる。
+    pub check_extension_updates: bool,
+    /// Extension ごとの設定（拡張機能の画面で変える）。`{ "<id>": { "<key>": 値 } }`
+    pub extension_settings: std::collections::BTreeMap<String, serde_json::Map<String, serde_json::Value>>,
 }
 
 impl Default for Settings {
@@ -53,6 +57,8 @@ impl Default for Settings {
             keymap: Vec::new(),
             disabled_extensions: Vec::new(),
             extensions_registry: None,
+            check_extension_updates: true,
+            extension_settings: Default::default(),
         }
     }
 }

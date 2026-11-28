@@ -80,6 +80,48 @@ pub struct Contributes {
     /// ドックに置くビュー（ui@1、`ui: [panel.<場所>]` の権限）。
     #[serde(default)]
     pub views: Vec<ViewContribution>,
+    /// 利用者が拡張機能の画面で変えられる設定（権限不要。値は `get-setting` で読む）。
+    #[serde(default)]
+    pub settings: Vec<SettingContribution>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SettingKind {
+    /// `options` の中から1つ選ぶ。
+    Enum,
+    Boolean,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SettingOption {
+    pub value: String,
+    pub label: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SettingContribution {
+    pub key: String,
+    pub title: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(rename = "type")]
+    pub kind: SettingKind,
+    #[serde(default)]
+    pub options: Vec<SettingOption>,
+    pub default: serde_json::Value,
+}
+
+impl SettingContribution {
+    /// この設定の値として正しいか。
+    pub fn accepts(&self, v: &serde_json::Value) -> bool {
+        match self.kind {
+            SettingKind::Boolean => v.is_boolean(),
+            SettingKind::Enum => v.as_str().is_some_and(|s| self.options.iter().any(|o| o.value == s)),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -290,6 +332,18 @@ impl Manifest {
                     c.id,
                     self.id.split_once('.').map_or("", |(_, n)| n)
                 ));
+            }
+        }
+        let mut keys = std::collections::HashSet::new();
+        for s in &self.contributes.settings {
+            if !keys.insert(&s.key) {
+                errors.push(format!("設定 `{}` が2回ある", s.key));
+            }
+            if s.kind == SettingKind::Enum && s.options.is_empty() {
+                errors.push(format!("設定 `{}` には options が必要", s.key));
+            }
+            if !s.accepts(&s.default) {
+                errors.push(format!("設定 `{}` の default が正しくない", s.key));
             }
         }
         for v in &self.contributes.views {

@@ -266,7 +266,9 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<String>) -> Result<(), String>
 
 /// 配布物から一覧の項目を作る（公開用の CLI と CI が使う）。
 pub fn entry_for(archive: &[u8], download: &str, repository: Option<String>) -> Result<IndexEntry, String> {
-    let tmp = std::env::temp_dir().join(format!("nucleus-entry-{}", std::process::id()));
+    static SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = std::env::temp_dir().join(format!("nucleus-entry-{}-{n}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
     let r = extract(archive, &tmp).and_then(|_| read_manifest(&tmp));

@@ -28,6 +28,7 @@ use std::{
 use editor::{EditorEvent, EditorPanel, LoadError};
 use gpui_kit::{
     App, AppContext as _, Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _, IntoElement,
+    StatefulInteractiveElement as _,
     KeyBinding, ParentElement, PathPromptOptions, Render, SharedString, Styled, Subscription, Task, WeakEntity, Window,
     WindowBounds, WindowOptions, actions,
     assets::IconName,
@@ -262,6 +263,7 @@ impl Workspace {
                 this.on_extensions_loaded(window, cx);
             }),
         );
+        subs.push(cx.observe_global::<extensions_page::ExtensionUpdates>(|_, cx| cx.notify()));
         subs.push(cx.subscribe_in(&search_panel, window, |this, _, e, window, cx| {
             this.on_search_event(e, window, cx)
         }));
@@ -529,6 +531,7 @@ impl Workspace {
         };
         if store.stage == extension_host::Stage::Ready && !self.extension_errors_shown {
             self.extension_errors_shown = true;
+            self.check_extension_updates(window, cx);
             // Extension の読み込みより先に開いていたファイルも、言語サーバーにつなぐ。
             let open: Vec<_> = self.editors.values().filter_map(WeakEntity::upgrade).collect();
             for e in open {
@@ -728,6 +731,27 @@ impl Workspace {
                 language_support::ServerStatus::Failed => (IconName::CircleX, name.clone()),
             };
             bar = bar.right(item(Some(icon), label, cx));
+        }
+        // Extension の更新があれば、押すと拡張機能の画面を開く印を出す。
+        let updates = cx
+            .try_global::<extensions_page::ExtensionUpdates>()
+            .map_or(0, |u| u.available.len());
+        if updates > 0 {
+            bar = bar.right(
+                div()
+                    .id("extension-updates")
+                    .cursor_pointer()
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .px_2()
+                            .text_xs()
+                            .text_color(cx.token(Token::PrimaryBackground))
+                            .child(Icon::new(IconName::Puzzle).xsmall())
+                            .child(cx.t_args("core.status.extension-updates", &[("count", updates.into())])),
+                    )
+                    .on_click(cx.listener(|this, _, window, cx| this.open_extensions(window, cx))),
+            );
         }
         let (errors, warnings) = self.lsp.counts();
         bar.left(item(

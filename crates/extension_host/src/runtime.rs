@@ -7,6 +7,7 @@
 //! - WASI は p2。ファイル・ネットワーク・環境変数は渡さない（標準出力・標準エラーはログに流す）。
 
 use std::{
+    collections::HashMap,
     path::{Component, Path, PathBuf},
     sync::{
         Arc, OnceLock, RwLock,
@@ -121,6 +122,18 @@ pub struct ActiveDocument {
 pub struct HostContext {
     ui: async_mpsc::UnboundedSender<UiRequest>,
     root: Arc<RwLock<Option<PathBuf>>>,
+    /// 利用者が変えた Extension の設定（Extension の ID → キー → 値）。
+    settings: Arc<RwLock<ExtensionSettings>>,
+}
+
+/// Extension の ID → 設定のキー → 値。
+pub type ExtensionSettings = std::collections::BTreeMap<String, serde_json::Map<String, serde_json::Value>>;
+
+/// `render` の結果: 要素の木と、canvas に足す文字（canvas の key ごと）。
+#[derive(Clone, Debug, Default)]
+pub struct Rendered {
+    pub nodes: Vec<ui::Node>,
+    pub texts: HashMap<String, Vec<ui::TextLine>>,
 }
 
 impl HostContext {
@@ -130,6 +143,7 @@ impl HostContext {
             HostContext {
                 ui: tx,
                 root: Arc::new(RwLock::new(None)),
+                settings: Arc::default(),
             },
             rx,
         )
@@ -140,6 +154,21 @@ impl HostContext {
         if let Ok(mut r) = self.root.write() {
             *r = root;
         }
+    }
+
+    /// 利用者の設定を入れ替える。値が変わったら true。
+    pub fn set_extension_settings(&self, settings: ExtensionSettings) -> bool {
+        match self.settings.write() {
+            Ok(mut s) if *s != settings => {
+                *s = settings;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn setting(&self, extension: &str, key: &str) -> Option<serde_json::Value> {
+        self.settings.read().ok()?.get(extension)?.get(key).cloned()
     }
 
     fn root(&self) -> Option<PathBuf> {
@@ -154,7 +183,7 @@ enum Call {
     },
     Render {
         view: String,
-        reply: oneshot::Sender<Result<Vec<ui::Node>, String>>,
+        reply: oneshot::Sender<Result<Rendered, String>>,
     },
     UiEvent {
         view: String,
@@ -185,7 +214,7 @@ impl WasmExtension {
     }
 
     /// ビューの中身を描く（要素の木を返す）。
-    pub fn render(&self, view: &str) -> oneshot::Receiver<Result<Vec<ui::Node>, String>> {
+    pub fn render(&self, view: &str) -> oneshot::Receiver<Result<Rendered, String>> {
         let (reply, rx) = oneshot::channel();
         if let Err(mpsc::SendError(Call::Render { reply, .. })) = self.calls.send(Call::Render {
             view: view.to_string(),
@@ -279,6 +308,8 @@ pub fn spawn(
 struct State {
     manifest: Manifest,
     host: HostContext,
+    /// `render` の中で `canvas-text` で足された文字。
+    canvas_texts: HashMap<String, Vec<ui::TextLine>>,
     wasi: WasiCtx,
     table: ResourceTable,
     limits: StoreLimits,
@@ -310,6 +341,7 @@ impl Instance {
         let state = State {
             manifest,
             host,
+            canvas_texts: HashMap::new(),
             wasi,
             table: ResourceTable::new(),
             limits: StoreLimitsBuilder::new()
@@ -346,11 +378,16 @@ impl Instance {
                     (trap, true)
                 }
                 Call::Render { view, reply } => {
+                    self.store.data_mut().canvas_texts.clear();
                     let r = self
                         .bindings
                         .call_render(&mut self.store, &view)
                         .map_err(trap_message)
-                        .and_then(|nodes| validate_tree(&nodes).map(|_| nodes));
+                        .and_then(|nodes| validate_tree(&nodes).map(|_| nodes))
+                        .map(|nodes| Rendered {
+                            nodes,
+                            texts: std::mem::take(&mut self.store.data_mut().canvas_texts),
+                        });
                     let trap = trapped(&r);
                     let _ = reply.send(r);
                     (trap, false)
@@ -500,7 +537,19 @@ pub fn confine(root: &Path, path: &str) -> Result<PathBuf, String> {
     Ok(normal)
 }
 
-impl ui::Host for State {}
+/// 1回の `render` で足せる文字の行の上限。
+const MAX_TEXT_LINES: usize = 4000;
+
+impl ui::Host for State {
+    fn canvas_text(&mut self, canvas_key: String, lines: Vec<ui::TextLine>) {
+        let total: usize = self.canvas_texts.values().map(Vec::len).sum();
+        let room = MAX_TEXT_LINES.saturating_sub(total);
+        self.canvas_texts
+            .entry(canvas_key)
+            .or_default()
+            .extend(lines.into_iter().take(room));
+    }
+}
 impl bindings::nucleus::extension::events::Host for State {}
 
 impl host::Host for State {
@@ -625,6 +674,16 @@ impl host::Host for State {
 
     fn run_process(&mut self, command: String, args: Vec<String>) -> Result<ProcessOutput, String> {
         self.process(command, args, None)
+    }
+
+    fn get_setting(&mut self, key: String) -> Option<String> {
+        let decl = self.manifest.contributes.settings.iter().find(|s| s.key == key)?;
+        let value = self
+            .host
+            .setting(&self.manifest.id, &key)
+            .filter(|v| decl.accepts(v))
+            .unwrap_or_else(|| decl.default.clone());
+        serde_json::to_string(&value).ok()
     }
 }
 

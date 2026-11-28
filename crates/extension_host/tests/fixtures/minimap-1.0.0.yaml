@@ -1,0 +1,16 @@
+# 公式の MiniMap Extension（ソースは extensions-src/minimap）。組み込みではなく sofia-gros/nucleus-extensions から配る。エディタの右側にファイルの全体像を描く。
+id: nucleus.minimap
+name: Minimap
+version: 1.0.0
+publisher: nucleus
+description: A minimap of the whole file beside each editor. Click or drag to scroll.
+api: { core: 1, ui: 1 }
+permissions:
+  ui: [editor.side]
+  editor: [read]
+contributes:
+  views:
+    - { id: minimap, title: Minimap, location: editor }
+  commands:
+    - { id: minimap.toggle, title: "Minimap: Toggle" }
+main: minimap.wasm

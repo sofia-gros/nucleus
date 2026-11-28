@@ -1,6 +1,8 @@
 // Nucleus Extension API — core@1 と ui@1（docs/ARCHITECTURE.md §4.3, §4.4）。
-// 追加だけ行い、壊す変更はメジャー版でだけ行う。UI の API は `ui` interface にまとめ、manifest の api.ui で版を宣言する。
-package nucleus:extension@1.0.0;
+// 追加だけ行い、壊す変更はメジャー版でだけ行う。既にある型（record / variant / enum）の形は変えない
+// （変えると、前の版でビルドした Extension が読み込めなくなる）。新しいことは関数と型の追加で表す。
+// 1.1.0: host.get-setting、ui.canvas-text を追加。UI の API は `ui` interface にまとめ、manifest の api.ui で版を宣言する。
+package nucleus:extension@1.1.0;
 
 /// Host（Nucleus）が Extension に提供する関数。呼ぶには extension.yaml で権限を宣言する。
 interface host {
@@ -76,6 +78,10 @@ interface host {
 
     /// エディタを、`line`（0 始まり）が上に来るように動かす（`editor: [read]`）。カーソルは動かさない。
     scroll-editor: func(editor: u32, line: u32);
+
+    /// この Extension の設定（`contributes.settings`）の値を JSON で返す（権限不要、1.1.0）。
+    /// 利用者が変えていなければ既定値。設定が変わると、この Extension のビューが描き直される。
+    get-setting: func(key: string) -> option<string>;
 }
 
 /// 宣言的な UI（ui@1）。Extension は要素の木を返すだけで、描画は Nucleus が gpui-kit の部品で行う。
@@ -198,6 +204,25 @@ interface ui {
         kind: kind,
         children: list<u32>,
     }
+
+    /// 文字の一部（1.1.0）。`color` は Token のキー。
+    record text-span {
+        text: string,
+        color: string,
+    }
+
+    /// 1行の文字（1.1.0）。等幅のコード用フォントで描く。
+    record text-line {
+        x: f32,
+        y: f32,
+        /// 文字の大きさ（px）。
+        size: f32,
+        alpha: f32,
+        spans: list<text-span>,
+    }
+
+    /// `render` の中で呼ぶと、同じ `key` の canvas に文字を足して描く（1.1.0）。
+    canvas-text: func(canvas-key: string, lines: list<text-line>);
 
     variant ui-event {
         click,

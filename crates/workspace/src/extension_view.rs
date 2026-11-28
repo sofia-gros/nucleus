@@ -7,6 +7,7 @@
 use std::{cell::Cell, collections::HashMap, ops::Range, rc::Rc};
 
 use gpui_kit::component::input::EditorState;
+use gpui_kit::{ContentMask, TextAlign, TextRun, font};
 
 use gpui_kit::{
     AnyElement, App, AppContext as _, Bounds, Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable, Hsla,
@@ -35,7 +36,7 @@ use extension_host::{
     manifest::ViewContribution,
     ui::{
         ButtonProps, ButtonVariant, CanvasProps, Direction, InputProps, Kind, Node, PointerEvent, PointerKind, Size,
-        Tone, UiEvent,
+        TextLine, Tone, UiEvent,
     },
 };
 
@@ -56,6 +57,12 @@ pub struct ExtensionPanel {
     view: ViewContribution,
     focus: FocusHandle,
     nodes: Option<Vec<Node>>,
+    /// canvas に足す文字（canvas の key ごと、1.1.0 の `canvas-text`）。
+    texts: HashMap<String, Vec<TextLine>>,
+    /// この Extension の設定（変わったら描き直す）。
+    last_settings: Option<serde_json::Map<String, serde_json::Value>>,
+    /// 前回描いた Extension（更新して起動し直したら描き直す）。
+    running: Option<std::sync::Weak<extension_host::runtime::WasmExtension>>,
     error: Option<String>,
     inputs: HashMap<String, InputSlot>,
     collapsed: HashMap<String, bool>,
@@ -86,6 +93,9 @@ impl ExtensionPanel {
             view,
             focus: cx.focus_handle(),
             nodes: None,
+            texts: HashMap::new(),
+            last_settings: None,
+            running: None,
             error: None,
             inputs: HashMap::new(),
             collapsed: HashMap::new(),
@@ -98,9 +108,29 @@ impl ExtensionPanel {
             _subscriptions: Vec::new(),
         };
         this.render_key = this.view.id.clone();
+        this.last_settings = settings::ActiveSettings::get(cx)
+            .extension_settings
+            .get(&this.extension)
+            .cloned();
         // Extension の起動が終わったら最初の描画をする。
         this._subscriptions.push(cx.observe_global::<WasmHost>(|this, cx| {
-            if this.nodes.is_none() && !this.rendering {
+            // 起動が終わったとき、更新で起動し直したときに描く。
+            let now = WasmHost::get(&this.extension, cx);
+            let same = match (&this.running, &now) {
+                (Some(old), Some(now)) => std::ptr::eq(old.as_ptr(), std::sync::Arc::as_ptr(now)),
+                (None, None) => true,
+                _ => false,
+            };
+            if (!same || this.nodes.is_none()) && !this.rendering {
+                this.refresh(cx);
+            }
+        }));
+        // Extension の設定が変わったら描き直す。
+        this._subscriptions.push(cx.observe_global::<settings::ActiveSettings>(|this, cx| {
+            crate::extension_bridge::sync_extension_settings(cx);
+            let mine = settings::ActiveSettings::get(cx).extension_settings.get(&this.extension).cloned();
+            if mine != this.last_settings {
+                this.last_settings = mine;
                 this.refresh(cx);
             }
         }));
@@ -158,6 +188,8 @@ impl ExtensionPanel {
             }
             return;
         };
+        crate::extension_bridge::sync_extension_settings(cx);
+        self.running = Some(std::sync::Arc::downgrade(&ext));
         self.rendering = true;
         let rx = ext.render(&self.render_key);
         self._render_task = Some(cx.spawn(async move |this, cx| {
@@ -165,8 +197,9 @@ impl ExtensionPanel {
             this.update(cx, |this, cx| {
                 this.rendering = false;
                 match result {
-                    Ok(nodes) => {
-                        this.nodes = Some(nodes);
+                    Ok(rendered) => {
+                        this.nodes = Some(rendered.nodes);
+                        this.texts = rendered.texts;
                         this.error = None;
                     }
                     Err(e) => {
@@ -445,6 +478,40 @@ impl ExtensionPanel {
                 )
             })
             .collect();
+        // 文字の行（1.1.0）: 行ごとに、色の違う部分を1つの行としてまとめて組む。
+        let mono: SharedString = "JetBrains Mono".into();
+        let texts: Vec<(gpui_kit::Point<Pixels>, Pixels, SharedString, Vec<TextRun>)> = self
+            .texts
+            .get(&p.key)
+            .map(|lines| {
+                lines
+                    .iter()
+                    .filter(|l| l.size > 0.5 && l.size < 64.)
+                    .map(|l| {
+                        let mut text = String::new();
+                        let mut runs = Vec::new();
+                        for s in &l.spans {
+                            if s.text.is_empty() || s.text.contains('\n') {
+                                continue;
+                            }
+                            let color = Token::from_key(&s.color)
+                                .map_or(cx.token(Token::MutedForeground), |t| cx.token(t))
+                                .opacity(l.alpha.clamp(0., 1.));
+                            text.push_str(&s.text);
+                            runs.push(TextRun {
+                                len: s.text.len(),
+                                font: font(mono.clone()),
+                                color,
+                                background_color: None,
+                                underline: None,
+                                strikethrough: None,
+                            });
+                        }
+                        (point(px(l.x), px(l.y)), px(l.size), text.into(), runs)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         let area: Rc<Cell<Bounds<Pixels>>> = Rc::default();
         let paint_area = area.clone();
         let key = p.key.clone();
@@ -468,11 +535,27 @@ impl ExtensionPanel {
             .child(
                 canvas(
                     move |bounds, _, _| paint_area.set(bounds),
-                    move |bounds, _, window, _| {
+                    move |bounds, _, window, cx| {
                         for (r, color) in &rects {
                             let b = Bounds::new(bounds.origin + r.origin, r.size);
                             window.paint_quad(fill(b, *color));
                         }
+                        window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                            for (origin, size, text, runs) in &texts {
+                                if runs.is_empty() {
+                                    continue;
+                                }
+                                let line = window.text_system().shape_line(text.clone(), *size, runs, None);
+                                let _ = line.paint(
+                                    bounds.origin + *origin,
+                                    *size,
+                                    TextAlign::Left,
+                                    None,
+                                    window,
+                                    cx,
+                                );
+                            }
+                        });
                     },
                 )
                 .size_full(),

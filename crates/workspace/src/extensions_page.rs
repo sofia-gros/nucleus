@@ -5,6 +5,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use extension_host::{
     ExtensionStore, Manifest,
+    manifest::SettingKind,
     registry::{self, Index, IndexEntry},
 };
 use gpui_kit::{
@@ -44,6 +45,8 @@ enum IndexState {
 pub enum ExtensionsPageEvent {
     /// 設定の `disabled_extensions` を書き換える。
     SetDisabled(Vec<String>),
+    /// 設定の `extension_settings` を書き換える。
+    SetExtensionSettings(serde_json::Value),
 }
 
 pub struct ExtensionsPage {
@@ -52,6 +55,8 @@ pub struct ExtensionsPage {
     query: Entity<InputState>,
     index: IndexState,
     installing: HashSet<String>,
+    /// 設定を開いている Extension。
+    expanded: HashSet<String>,
     /// 消したので、再起動すると無くなるもの。
     removed: HashSet<String>,
     _load: Option<Task<()>>,
@@ -76,7 +81,13 @@ fn install_dir() -> Option<std::path::PathBuf> {
 impl ExtensionsPage {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let query = cx.new(|cx| InputState::new(window, cx).placeholder(cx.t("core.extensions.search")));
+        // 起動時の更新の確認で読んだ一覧があれば使う。
+        let index = cx
+            .try_global::<ExtensionUpdates>()
+            .and_then(|u| u.index.clone())
+            .map_or(IndexState::NotLoaded, IndexState::Loaded);
         let subs = vec![
+            cx.observe_global::<ExtensionUpdates>(|_, cx| cx.notify()),
             cx.subscribe(&query, |_, _, e: &InputEvent, cx| {
                 if matches!(e, InputEvent::Change) {
                     cx.notify();
@@ -89,7 +100,8 @@ impl ExtensionsPage {
             focus: cx.focus_handle(),
             tab: Tab::Installed,
             query,
-            index: IndexState::NotLoaded,
+            index,
+            expanded: HashSet::new(),
             installing: HashSet::new(),
             removed: HashSet::new(),
             _load: None,
@@ -113,7 +125,11 @@ impl ExtensionsPage {
             let r = task.await;
             this.update(cx, |this, cx| {
                 this.index = match r {
-                    Ok(i) => IndexState::Loaded(Arc::new(i)),
+                    Ok(i) => {
+                        let i = Arc::new(i);
+                        set_index(i.clone(), cx);
+                        IndexState::Loaded(i)
+                    }
                     Err(e) => IndexState::Failed(e),
                 };
                 cx.notify();
@@ -185,6 +201,7 @@ impl ExtensionsPage {
             this.update_in(cx, |this, window, cx| {
                 this.installing.remove(&entry.id);
                 let r = r.and_then(|dir| extension_host::add_installed(dir, cx));
+                recompute_updates(cx);
                 let n = match r {
                     Ok(()) => Notification::success(cx.t_args(
                         "core.extensions.installed-notify",
@@ -252,6 +269,8 @@ impl ExtensionsPage {
         let mut list: Vec<_> = store.extensions.to_vec();
         list.sort_by_key(|e| e.manifest.name.to_lowercase());
         let failed: Vec<_> = store.failed.to_vec();
+        // 読み込み時点で無効だったもの（設定と違えば再起動で反映）。
+        let loaded_disabled = store.disabled.clone();
         let mut out = Vec::new();
         for (ix, e) in list.into_iter().enumerate() {
             let m = &e.manifest;
@@ -268,10 +287,47 @@ impl ExtensionsPage {
             if is_disabled {
                 badges.push((cx.t("core.extensions.disabled"), Token::HighlightModified));
             }
-            if removed || is_disabled != store.disabled.contains(&id) {
+            if removed || is_disabled != loaded_disabled.contains(&id) {
                 badges.push((cx.t("core.extensions.restart-required"), Token::HighlightModified));
             }
             let mut actions: Vec<AnyElement> = Vec::new();
+            let update = cx.try_global::<ExtensionUpdates>().and_then(|u| {
+                let up = u.available.iter().find(|x| x.id == id)?;
+                u.index.as_ref()?.extensions.iter().find(|x| x.id == up.id).cloned()
+            });
+            if let Some(entry) = update.filter(|_| !removed) {
+                let busy = self.installing.contains(&id);
+                let b = Button::new(("update", ix))
+                    .small()
+                    .primary()
+                    .disabled(busy)
+                    .label(if busy {
+                        cx.t("core.extensions.installing")
+                    } else {
+                        cx.t_args("core.extensions.update", &[("version", entry.version.clone().into())])
+                    })
+                    .on_click(cx.listener(move |this, _, window, cx| this.confirm_install(entry.clone(), window, cx)));
+                actions.push(b.into_any_element());
+            }
+            if !m.contributes.settings.is_empty() {
+                let sid = id.clone();
+                let open = self.expanded.contains(&id);
+                actions.push(
+                    Button::new(("settings", ix))
+                        .small()
+                        .ghost()
+                        .icon(IconName::Settings2)
+                        .tooltip(cx.t("core.extensions.settings"))
+                        .map(|b| if open { b.primary() } else { b })
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if !this.expanded.remove(&sid) {
+                                this.expanded.insert(sid.clone());
+                            }
+                            cx.notify();
+                        }))
+                        .into_any_element(),
+                );
+            }
             if !removed {
                 let toggle_id = id.clone();
                 actions.push(
@@ -301,6 +357,9 @@ impl ExtensionsPage {
                 }
             }
             out.push(card(m, badges, actions, cx));
+            if self.expanded.contains(&id) {
+                out.push(self.settings_form(m, ix, cx));
+            }
         }
         for f in failed {
             out.push(
@@ -325,6 +384,92 @@ impl ExtensionsPage {
             );
         }
         out
+    }
+
+    /// Extension の設定（`contributes.settings`）。選んだ値はユーザー設定の `extension_settings` に書く。
+    fn settings_form(&self, m: &Manifest, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+        let current = settings::ActiveSettings::get(cx)
+            .extension_settings
+            .get(&m.id)
+            .cloned()
+            .unwrap_or_default();
+        let mut rows = Vec::new();
+        for (si, s) in m.contributes.settings.iter().enumerate() {
+            let value = current
+                .get(&s.key)
+                .filter(|v| s.accepts(v))
+                .cloned()
+                .unwrap_or_else(|| s.default.clone());
+            let choices: Vec<(serde_json::Value, String)> = match s.kind {
+                SettingKind::Enum => s
+                    .options
+                    .iter()
+                    .map(|o| (serde_json::Value::String(o.value.clone()), o.label.clone()))
+                    .collect(),
+                SettingKind::Boolean => vec![
+                    (serde_json::Value::Bool(true), cx.t("core.extensions.on").to_string()),
+                    (serde_json::Value::Bool(false), cx.t("core.extensions.off").to_string()),
+                ],
+            };
+            let buttons: Vec<AnyElement> = choices
+                .into_iter()
+                .enumerate()
+                .map(|(ci, (v, label))| {
+                    let selected = v == value;
+                    let (id, key) = (m.id.clone(), s.key.clone());
+                    Button::new(("setting", ix * 10_000 + si * 100 + ci))
+                        .small()
+                        .label(label)
+                        .map(|b| if selected { b.primary() } else { b.outline() })
+                        .on_click(cx.listener(move |this, _, _, cx| this.set_setting(&id, &key, v.clone(), cx)))
+                        .into_any_element()
+                })
+                .collect();
+            rows.push(
+                h_flex()
+                    .gap_4()
+                    .items_start()
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.token(Token::Foreground))
+                                    .child(s.title.clone()),
+                            )
+                            .when_some(s.description.clone(), |d, desc| {
+                                d.child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.token(Token::MutedForeground))
+                                        .child(desc),
+                                )
+                            }),
+                    )
+                    .child(h_flex().gap_1().children(buttons))
+                    .into_any_element(),
+            );
+        }
+        v_flex()
+            .ml(px(64.))
+            .mr_3()
+            .mb_3()
+            .p_3()
+            .gap_3()
+            .rounded_lg()
+            .bg(cx.token(Token::MutedBackground))
+            .children(rows)
+            .into_any_element()
+    }
+
+    fn set_setting(&mut self, id: &str, key: &str, value: serde_json::Value, cx: &mut Context<Self>) {
+        let mut all = settings::ActiveSettings::get(cx).extension_settings.clone();
+        all.entry(id.to_string()).or_default().insert(key.to_string(), value);
+        if let Ok(v) = serde_json::to_value(all) {
+            cx.emit(ExtensionsPageEvent::SetExtensionSettings(v));
+        }
     }
 
     fn render_browse(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
@@ -633,5 +778,99 @@ impl Render for ExtensionsPage {
                     .overflow_y_scroll()
                     .child(v_flex().max_w(px(880.)).w_full().mx_auto().px_4().pb_4().children(rows)),
             )
+    }
+}
+
+/// 起動時に確かめた Extension の更新（gpui の Global）。
+#[derive(Default)]
+pub struct ExtensionUpdates {
+    /// 最後に読んだ一覧。
+    pub index: Option<Arc<Index>>,
+    pub available: Vec<Update>,
+}
+
+impl gpui_kit::Global for ExtensionUpdates {}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Update {
+    pub id: String,
+    pub name: String,
+    pub from: String,
+    pub to: String,
+}
+
+/// `a` が `b` より新しい版か（`1.10.0` > `1.9.0`。数字でない部分は文字列で比べる）。
+pub fn is_newer(a: &str, b: &str) -> bool {
+    let parse = |v: &str| -> Vec<Result<u64, String>> {
+        v.split(['.', '-', '+'])
+            .map(|p| p.parse::<u64>().map_err(|_| p.to_string()))
+            .collect()
+    };
+    let (a, b) = (parse(a), parse(b));
+    for (x, y) in a.iter().zip(b.iter()) {
+        let ord = match (x, y) {
+            (Ok(x), Ok(y)) => x.cmp(y),
+            (Ok(_), Err(_)) => std::cmp::Ordering::Greater,
+            (Err(_), Ok(_)) => std::cmp::Ordering::Less,
+            (Err(x), Err(y)) => x.cmp(y),
+        };
+        if ord != std::cmp::Ordering::Equal {
+            return ord == std::cmp::Ordering::Greater;
+        }
+    }
+    // 同じところまで等しい: 数字が続く方が新しい（1.0.1 > 1.0）、文字が続く方は古い（1.0.0-beta < 1.0.0）。
+    match a.len().cmp(&b.len()) {
+        std::cmp::Ordering::Greater => a[b.len()].is_ok(),
+        std::cmp::Ordering::Less => b[a.len()].is_err(),
+        std::cmp::Ordering::Equal => false,
+    }
+}
+
+/// 一覧と、入れてある Extension（組み込みは除く）を比べる。
+pub fn compute_updates(index: &Index, cx: &App) -> Vec<Update> {
+    let Some(store) = ExtensionStore::get(cx) else { return Vec::new() };
+    store
+        .extensions
+        .iter()
+        .filter(|e| !e.builtin)
+        .filter_map(|e| {
+            let entry = index.extensions.iter().find(|x| x.id == e.manifest.id)?;
+            is_newer(&entry.version, &e.manifest.version).then(|| Update {
+                id: entry.id.clone(),
+                name: entry.name.clone(),
+                from: e.manifest.version.clone(),
+                to: entry.version.clone(),
+            })
+        })
+        .collect()
+}
+
+/// 一覧を新しくし、更新を数え直す。
+pub fn set_index(index: Arc<Index>, cx: &mut App) {
+    let available = compute_updates(&index, cx);
+    cx.set_global(ExtensionUpdates {
+        index: Some(index),
+        available,
+    });
+}
+
+/// 入れたり更新したりした後に数え直す。
+pub fn recompute_updates(cx: &mut App) {
+    if let Some(index) = cx.try_global::<ExtensionUpdates>().and_then(|u| u.index.clone()) {
+        set_index(index, cx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_newer;
+
+    #[test]
+    fn versions_compare_numerically() {
+        assert!(is_newer("1.1.0", "1.0.0"));
+        assert!(is_newer("1.10.0", "1.9.3"));
+        assert!(!is_newer("1.0.0", "1.0.0"));
+        assert!(!is_newer("0.9", "1.0.0"));
+        assert!(is_newer("1.0.0", "1.0.0-beta"));
     }
 }

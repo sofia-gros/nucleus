@@ -132,7 +132,7 @@ fn git_view_renders_and_stages() {
     let (ext, ready) = runtime::spawn(manifest, Arc::from(GIT_WASM), host);
     block_on(ready).unwrap().expect("activate");
 
-    let nodes = block_on(ext.render("changes")).unwrap().unwrap();
+    let nodes = block_on(ext.render("changes")).unwrap().unwrap().nodes;
     runtime::validate_tree(&nodes).unwrap();
     let t = texts(&nodes);
     assert!(t.contains(&"Unstaged Changes".to_string()), "{t:?}");
@@ -141,7 +141,7 @@ fn git_view_renders_and_stages() {
     block_on(ext.ui_event("changes", "stage-all", extension_host::ui::UiEvent::Click))
         .unwrap()
         .unwrap();
-    let nodes = block_on(ext.render("changes")).unwrap().unwrap();
+    let nodes = block_on(ext.render("changes")).unwrap().unwrap().nodes;
     let staged = nodes.iter().any(|n| {
         matches!(&n.kind, extension_host::ui::Kind::Section(s) if s.title == "Staged Changes" && s.count == Some(1))
     });
@@ -206,7 +206,7 @@ fn minimap_draws_and_scrolls() {
     let (ext, ready) = runtime::spawn(manifest, Arc::from(MINIMAP_WASM), host);
     block_on(ready).unwrap().expect("activate");
 
-    let nodes = block_on(ext.render("minimap@7")).unwrap().unwrap();
+    let nodes = block_on(ext.render("minimap@7")).unwrap().unwrap().nodes;
     let rects = nodes
         .iter()
         .find_map(|n| match &n.kind {
@@ -229,4 +229,37 @@ fn minimap_draws_and_scrolls() {
     let (editor, line) = scrolled.lock().unwrap().expect("scrolled");
     assert_eq!(editor, 7);
     assert!((100..200).contains(&line), "{line}");
+}
+
+/// API の互換: 1.0.0 の API でビルドして公開した MiniMap が、いまの Nucleus でもそのまま動く。
+#[test]
+fn extensions_built_for_api_1_0_still_load() {
+    let wasm: &[u8] = include_bytes!("fixtures/minimap-1.0.0.wasm");
+    let manifest = Manifest::from_yaml(include_str!("fixtures/minimap-1.0.0.yaml")).unwrap();
+    let (host, rx) = HostContext::new();
+    std::thread::spawn(move || {
+        let mut rx = rx;
+        while let Some(req) = block_on(rx.next()) {
+            match req {
+                UiRequest::EditorView { reply, .. } => {
+                    let _ = reply.send(Some(extension_host::EditorViewInfo {
+                        version: 1,
+                        first_line: 0,
+                        last_line: 9,
+                        line_count: 20,
+                        cursor_line: 0,
+                        height: 200.0,
+                    }));
+                }
+                UiRequest::EditorText { reply, .. } => {
+                    let _ = reply.send(Some("fn main() {}\n".repeat(20)));
+                }
+                _ => {}
+            }
+        }
+    });
+    let (ext, ready) = runtime::spawn(manifest, Arc::from(wasm), host);
+    block_on(ready).unwrap().expect("1.0.0 activates");
+    let r = block_on(ext.render("minimap@1")).unwrap().unwrap();
+    assert!(r.nodes.len() >= 2);
 }

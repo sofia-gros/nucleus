@@ -216,3 +216,15 @@ core-extensions-installed-notify = { $name } was installed.
 core-extensions-install-failed = Could not install { $name }: { $error }
 core-extensions-confirm-uninstall = Uninstall { $name }? It is removed when Nucleus restarts.
 core-extensions-uninstalled-notify = { $name } was uninstalled. Restart Nucleus to finish.
+core-extensions-settings = Settings
+core-extensions-on = On
+core-extensions-off = Off
+core-extensions-open = Open Extensions
+core-extensions-updates-available = { $count ->
+        [one] An extension update is available
+       *[other] { $count } extension updates are available
+    }: { $list }
+core-status-extension-updates = { $count ->
+        [one] 1 update
+       *[other] { $count } updates
+    }

@@ -8,7 +8,7 @@
 use crate::bindings::nucleus::extension::ui::IconProps;
 pub use crate::bindings::nucleus::extension::ui::{
     ButtonProps, ButtonVariant, CanvasProps, Direction, DrawRect, InputProps, Kind, ListItemProps, Node, PointerEvent,
-    PointerKind, SectionProps, Size, StackProps, TextProps, Tone, UiEvent,
+    PointerKind, SectionProps, Size, StackProps, TextLine, TextProps, TextSpan, Tone, UiEvent, canvas_text,
 };
 
 /// 要素（子を持てる）。`flatten` で WIT の平らな配列にする。
