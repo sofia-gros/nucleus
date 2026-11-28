@@ -13,6 +13,7 @@ use gpui_kit::{
         button::{Button, ButtonVariants as _},
         dock::{BasePanel, Panel, PanelEvent},
         h_flex,
+        input::Input,
         menu::ContextMenuExt as _,
         v_flex,
     },
@@ -23,6 +24,16 @@ use gpui_kit::{
 use i18n::Translate as _;
 use project::{DirWatcher, EntryKind, ProjectTree, Row};
 use theme::{Token, TokenColors as _};
+
+/// ツリーに並べる1行。
+#[derive(Clone, Copy)]
+enum Slot {
+    Row(usize),
+    /// 新しく作るものの名前を入れる行（深さ）。
+    NewInput(usize),
+    /// 入力の誤りを出す行（深さ）。
+    Error(usize),
+}
 
 pub enum ProjectPanelEvent {
     OpenFile(PathBuf),
@@ -39,9 +50,13 @@ pub struct ProjectPanel {
     focus: FocusHandle,
     tree: Option<ProjectTree>,
     rows: Arc<Vec<Row>>,
-    selected: Option<PathBuf>,
+    pub(crate) selected: Option<PathBuf>,
     watcher: Option<DirWatcher>,
     scroll: UniformListScrollHandle,
+    /// 右クリックした項目（パス, フォルダか）。
+    context_target: Option<(PathBuf, bool)>,
+    /// ツリーの中で入力している名前（新しいファイル・フォルダ、名前の変更）。
+    pub(crate) editing: Option<crate::project_actions::Edit>,
     _watch_task: Option<Task<()>>,
 }
 
@@ -54,6 +69,8 @@ impl ProjectPanel {
             selected: None,
             watcher: None,
             scroll: UniformListScrollHandle::new(),
+            context_target: None,
+            editing: None,
             _watch_task: None,
         }
     }
@@ -97,6 +114,116 @@ impl ProjectPanel {
         }
         self.load(to_load, cx);
         cx.notify();
+    }
+
+    /// フォルダを開く（閉じていれば。読み込みが要れば読む）。
+    pub(crate) fn expand(&mut self, dir: &std::path::Path, cx: &mut Context<Self>) {
+        let Some(tree) = self.tree.as_mut() else { return };
+        if dir == tree.root() || tree.is_expanded(dir) {
+            return;
+        }
+        if let Some(to_load) = tree.toggle(dir) {
+            self.load(to_load, cx);
+        }
+        if let Some(t) = &self.tree {
+            self.rows = t.rows();
+        }
+    }
+
+    /// 表示する行（ツリーの行と、新しく作るときの入力欄・エラーの行）。
+    fn slots(&self) -> Vec<Slot> {
+        let mut out: Vec<Slot> = (0..self.rows.len()).map(Slot::Row).collect();
+        let Some(edit) = &self.editing else { return out };
+        let (at, depth) = match edit.kind {
+            crate::project_actions::EditKind::Rename => {
+                let Some(ix) = edit
+                    .target
+                    .as_ref()
+                    .and_then(|t| self.rows.iter().position(|r| &r.path == t))
+                else {
+                    return out;
+                };
+                (ix + 1, None)
+            }
+            _ => {
+                let parent = self.rows.iter().position(|r| r.path == edit.dir);
+                let depth = parent.map_or(1, |p| self.rows[p].depth + 1);
+                let at = parent.map_or(0, |p| p + 1);
+                out.insert(at, Slot::NewInput(depth));
+                (at + 1, Some(depth))
+            }
+        };
+        if edit.error.is_some() {
+            let depth = depth.unwrap_or_else(|| self.rows.get(at - 1).map_or(1, |r| r.depth));
+            out.insert(at, Slot::Error(depth));
+        }
+        out
+    }
+
+    /// 名前を入れる行（新しく作るとき）。
+    fn render_input_row(&self, ix: usize, depth: usize, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        let Some(edit) = &self.editing else {
+            return div().into_any_element();
+        };
+        let folder = edit.kind == crate::project_actions::EditKind::NewFolder;
+        h_flex()
+            .id(("new", ix))
+            .h(px(24.))
+            .w_full()
+            .pl(px(8. + depth as f32 * 16.))
+            .pr_2()
+            .gap_1()
+            .child(div().w(px(14.)).flex_none())
+            .child(
+                Icon::new(if folder { IconName::Folder } else { IconName::FileCode })
+                    .small()
+                    .text_color(cx.token(if folder {
+                        Token::SidebarForeground
+                    } else {
+                        Token::ListHighlightForeground
+                    })),
+            )
+            .child(self.render_edit_input(cx))
+            .into_any_element()
+    }
+
+    /// 入力欄そのもの（Esc で取り消す）。
+    fn render_edit_input(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        let Some(edit) = &self.editing else {
+            return div().into_any_element();
+        };
+        div()
+            .flex_1()
+            .min_w_0()
+            .on_key_down(cx.listener(|this, e: &gpui_kit::KeyDownEvent, _, cx| {
+                if e.keystroke.key == "escape" {
+                    this.cancel_edit(cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .child(Input::new(&edit.input).xsmall().when(edit.error.is_some(), |i| {
+                i.border_color(cx.token(Token::HighlightError))
+            }))
+            .into_any_element()
+    }
+
+    fn render_error_row(&self, ix: usize, depth: usize, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        let message = self.editing.as_ref().and_then(|e| e.error.clone()).unwrap_or_default();
+        div()
+            .id(("error", ix))
+            .h(px(24.))
+            .w_full()
+            .pl(px(8. + depth as f32 * 16. + 34.))
+            .pr_2()
+            .flex()
+            .items_center()
+            .text_xs()
+            .text_color(cx.token(Token::HighlightError))
+            .overflow_hidden()
+            .whitespace_nowrap()
+            .text_ellipsis()
+            .child(message)
+            .into_any_element()
     }
 
     /// フォルダを読み直す（右クリックの操作の後。ファイルの監視より早く見せるため）。
@@ -188,21 +315,30 @@ impl ProjectPanel {
                 d.child(Icon::new(c).size(px(14.)).text_color(cx.token(Token::MutedForeground)))
             }))
             .child(Icon::new(icon).small().text_color(cx.token(icon_color)))
-            .child(
-                div()
-                    .flex_1()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .text_sm()
-                    .when(row.depth == 0, |d| d.font_weight(gpui_kit::FontWeight::MEDIUM))
-                    .text_color(if selected {
-                        cx.token(Token::SidebarAccentForeground)
-                    } else {
-                        cx.token(Token::SidebarForeground)
-                    })
-                    .child(SharedString::from(row.name.clone())),
-            )
+            .map(|d| {
+                // 名前を変えている行は、名前の代わりに入力欄を出す。
+                let renaming = self.editing.as_ref().is_some_and(|e| {
+                    e.kind == crate::project_actions::EditKind::Rename && e.target.as_ref() == Some(&row.path)
+                });
+                if renaming {
+                    return d.child(self.render_edit_input(cx));
+                }
+                d.child(
+                    div()
+                        .flex_1()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .text_sm()
+                        .when(row.depth == 0, |d| d.font_weight(gpui_kit::FontWeight::MEDIUM))
+                        .text_color(if selected {
+                            cx.token(Token::SidebarAccentForeground)
+                        } else {
+                            cx.token(Token::SidebarForeground)
+                        })
+                        .child(SharedString::from(row.name.clone())),
+                )
+            })
             .when(row.loading, |d| {
                 d.child(
                     div()
@@ -212,9 +348,9 @@ impl ProjectPanel {
                 )
             })
             .on_click(cx.listener(move |this, _, _, cx| this.click(ix, cx)))
-            .context_menu({
-                let (path, focus) = (row.path.clone(), self.focus.clone());
-                move |m, _, cx| crate::project_actions::menu(m.action_context(focus.clone()), &path, is_dir, cx)
+            .on_mouse_down(gpui_kit::MouseButton::Right, {
+                let path = row.path.clone();
+                cx.listener(move |this, _, _, _| this.context_target = Some((path.clone(), is_dir)))
             })
             .into_any_element()
     }
@@ -296,13 +432,18 @@ impl Render for ProjectPanel {
             self.render_empty(cx).into_any_element()
         } else {
             let rows = self.rows.clone();
+            let slots = self.slots();
             uniform_list(
                 "project-tree",
-                rows.len(),
+                slots.len(),
                 cx.processor(move |this, range: std::ops::Range<usize>, _, cx| {
                     let mut items = Vec::with_capacity(range.len());
                     for ix in range {
-                        items.push(this.render_row(ix, &rows[ix], cx));
+                        items.push(match slots[ix] {
+                            Slot::Row(r) => this.render_row(r, &rows[r], cx),
+                            Slot::NewInput(depth) => this.render_input_row(ix, depth, cx),
+                            Slot::Error(depth) => this.render_error_row(ix, depth, cx),
+                        });
                     }
                     items
                 }),
@@ -312,13 +453,34 @@ impl Render for ProjectPanel {
             .pt_1()
             .into_any_element()
         };
+        // 右クリックメニューはパネル全体に1つ付け、どの行で押したかを覚えておく
+        // （仮想リストの行の中に付けると、メニューのクリックが届かない）。
+        let this = cx.entity().downgrade();
+        let focus = self.focus.clone();
         div()
+            .id("project-panel")
             .track_focus(&self.focus)
-            .on_action(cx.listener(|this, a: &crate::project_actions::TreeAction, window, cx| {
-                this.tree_action(a, window, cx)
+            .on_action(
+                cx.listener(|this, a: &crate::project_actions::TreeAction, window, cx| this.tree_action(a, window, cx)),
+            )
+            // 行より先に呼ばれるので、空いているところで押したらルートを対象にする。
+            .capture_any_mouse_down(cx.listener(|this, e: &gpui_kit::MouseDownEvent, _, _| {
+                if e.button == gpui_kit::MouseButton::Right {
+                    this.context_target = this.root().map(|r| (r, true));
+                }
             }))
             .size_full()
             .bg(cx.token(Token::SidebarBackground))
             .child(body)
+            .context_menu(move |m, _, cx| {
+                let target = this.upgrade().and_then(|p| p.read(cx).context_target.clone());
+                match target {
+                    Some((path, is_dir)) => {
+                        let is_root = this.upgrade().and_then(|p| p.read(cx).root()).as_ref() == Some(&path);
+                        crate::project_actions::menu(m.action_context(focus.clone()), &path, is_dir, is_root, cx)
+                    }
+                    None => m,
+                }
+            })
     }
 }

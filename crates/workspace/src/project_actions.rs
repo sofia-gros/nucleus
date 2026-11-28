@@ -3,21 +3,16 @@
 use std::path::{Path, PathBuf};
 
 use gpui_kit::{
-    AppContext as _, ClipboardItem, Context, Entity, ParentElement, PromptLevel, Styled, Window,
+    AppContext as _, ClipboardItem, Context, Entity, PromptLevel, Window,
     component::{
-        Sizable as _, WindowExt as _,
-        button::{Button, ButtonVariants as _},
-        h_flex,
-        input::{Input, InputEvent, InputState},
+        WindowExt as _,
+        input::{InputEvent, InputState},
         menu::PopupMenu,
         notification::Notification,
-        v_flex,
     },
-    div,
 };
 use i18n::Translate as _;
 use serde::Deserialize;
-use theme::{Token, TokenColors as _};
 
 use crate::project_panel::{ProjectPanel, ProjectPanelEvent};
 
@@ -41,20 +36,32 @@ pub enum TreeOp {
 }
 
 /// 右クリックメニュー。`is_dir` ならその中に、ファイルなら同じフォルダに新しく作る。
-pub fn menu(m: PopupMenu, path: &Path, is_dir: bool, cx: &gpui_kit::App) -> PopupMenu {
-    let a = |op| Box::new(TreeAction { op, path: path.to_path_buf() });
+/// 開いているフォルダそのもの（`is_root`）には、名前の変更とごみ箱を出さない。
+pub fn menu(m: PopupMenu, path: &Path, is_dir: bool, is_root: bool, cx: &gpui_kit::App) -> PopupMenu {
+    let a = |op| {
+        Box::new(TreeAction {
+            op,
+            path: path.to_path_buf(),
+        })
+    };
     let t = |k: &str| cx.t(k);
     let mut m = m
         .menu(t("core.tree.new-file"), a(TreeOp::NewFile))
         .menu(t("core.tree.new-folder"), a(TreeOp::NewFolder))
-        .separator()
-        .menu(t("core.tree.rename"), a(TreeOp::Rename))
-        .menu(t("core.tree.delete"), a(TreeOp::Delete))
-        .separator()
+        .separator();
+    if !is_root {
+        m = m
+            .menu(t("core.tree.rename"), a(TreeOp::Rename))
+            .menu(t("core.tree.delete"), a(TreeOp::Delete))
+            .separator();
+    }
+    let mut m = m
         .menu(t("core.tree.copy-path"), a(TreeOp::CopyPath))
         .menu(t("core.tree.copy-relative-path"), a(TreeOp::CopyRelativePath));
     if is_dir {
-        m = m.separator().menu(t("core.tree.open-in-terminal"), a(TreeOp::OpenInTerminal));
+        m = m
+            .separator()
+            .menu(t("core.tree.open-in-terminal"), a(TreeOp::OpenInTerminal));
     }
     m
 }
@@ -66,52 +73,23 @@ fn valid_name(name: &str) -> bool {
 
 impl ProjectPanel {
     pub(crate) fn tree_action(&mut self, a: &TreeAction, window: &mut Window, cx: &mut Context<Self>) {
+        self.cancel_edit(cx);
         let path = a.path.clone();
+        // 開いているフォルダそのものは消したり名前を変えたりしない（メニューにも出さない）。
+        if matches!(a.op, TreeOp::Rename | TreeOp::Delete) && self.root().as_ref() == Some(&path) {
+            return;
+        }
         let dir = if path.is_dir() {
             path.clone()
         } else {
             path.parent().map(Path::to_path_buf).unwrap_or_default()
         };
         match a.op {
-            TreeOp::NewFile | TreeOp::NewFolder => {
-                let folder = a.op == TreeOp::NewFolder;
-                let title = cx.t(if folder { "core.tree.new-folder" } else { "core.tree.new-file" });
-                self.ask_name(title, String::new(), window, cx, move |this, name, window, cx| {
-                    let target = dir.join(name);
-                    if target.exists() {
-                        return Err(cx.t_args("core.tree.exists", &[("name", name.to_string().into())]).into());
-                    }
-                    if folder {
-                        std::fs::create_dir_all(&target).map_err(|e| e.to_string())?;
-                    } else {
-                        std::fs::write(&target, "").map_err(|e| e.to_string())?;
-                        cx.emit(ProjectPanelEvent::OpenFile(target.clone()));
-                    }
-                    this.refresh_dir(&dir, cx);
-                    let _ = window;
-                    Ok(())
-                });
-            }
+            TreeOp::NewFile => self.start_edit(EditKind::NewFile, dir, None, window, cx),
+            TreeOp::NewFolder => self.start_edit(EditKind::NewFolder, dir, None, window, cx),
             TreeOp::Rename => {
-                let old_name = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default();
                 let parent = path.parent().map(Path::to_path_buf).unwrap_or_default();
-                let title = cx.t("core.tree.rename");
-                self.ask_name(title, old_name.clone(), window, cx, move |this, name, _, cx| {
-                    if name == old_name {
-                        return Ok(());
-                    }
-                    let target = parent.join(name);
-                    if target.exists() {
-                        return Err(cx.t_args("core.tree.exists", &[("name", name.to_string().into())]).into());
-                    }
-                    std::fs::rename(&path, &target).map_err(|e| e.to_string())?;
-                    cx.emit(ProjectPanelEvent::Renamed(path.clone(), target));
-                    this.refresh_dir(&parent, cx);
-                    Ok(())
-                });
+                self.start_edit(EditKind::Rename, parent, Some(path), window, cx)
             }
             TreeOp::Delete => {
                 let name = path
@@ -159,78 +137,136 @@ impl ProjectPanel {
         }
     }
 
-    /// 名前を入れてもらう。`apply` が Err を返したらダイアログを閉じずにエラーを出す。
-    fn ask_name(
+    /// ツリーの中で名前を入れ始める（VSCode と同じ）。新しく作るときはフォルダを開いて先頭に入力欄を出し、
+    /// 名前を変えるときはその行を入力欄にする。Enter かフォーカスが外れたら確定、Esc で取り消す。
+    fn start_edit(
         &mut self,
-        title: gpui_kit::SharedString,
-        initial: String,
+        kind: EditKind,
+        dir: PathBuf,
+        target: Option<PathBuf>,
         window: &mut Window,
         cx: &mut Context<Self>,
-        apply: impl Fn(&mut Self, &str, &mut Window, &mut Context<Self>) -> Result<(), String> + 'static,
     ) {
-        let input: Entity<InputState> = cx.new(|cx| InputState::new(window, cx).default_value(initial));
-        input.update(cx, |s, cx| {
-            s.focus(window, cx);
-            s.select_all(window, cx);
-        });
-        let error: Entity<Option<String>> = cx.new(|_| None);
-        let this = cx.entity().downgrade();
-        let apply = std::rc::Rc::new(apply);
-        let submit = {
-            let (input, error, this, apply) = (input.clone(), error.clone(), this.clone(), apply.clone());
-            move |window: &mut Window, cx: &mut gpui_kit::App| {
-                let name = input.read(cx).value().trim().to_string();
-                let result = if valid_name(&name) {
-                    this.update(cx, |this, cx| apply(this, &name, window, cx))
-                        .unwrap_or(Ok(()))
-                } else {
-                    Err(i18n::Translate::t(cx, "core.tree.invalid-name").to_string())
-                };
-                match result {
-                    Ok(()) => window.close_dialog(cx),
-                    Err(e) => error.update(cx, |v, cx| {
-                        *v = Some(e);
-                        cx.notify();
-                    }),
+        if kind != EditKind::Rename {
+            self.expand(&dir, cx);
+        }
+        let initial = target
+            .as_ref()
+            .and_then(|t| t.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let input: Entity<InputState> = cx.new(|cx| InputState::new(window, cx).default_value(initial.clone()));
+        let sub = cx.subscribe_in(&input, window, |this, _, e: &InputEvent, _, cx| match e {
+            InputEvent::PressEnter { .. } => this.commit_edit(false, cx),
+            InputEvent::Blur => this.commit_edit(true, cx),
+            InputEvent::Change => {
+                if let Some(edit) = this.editing.as_mut() {
+                    edit.error = None;
+                    cx.notify();
                 }
             }
+            _ => {}
+        });
+        self.editing = Some(Edit {
+            kind,
+            dir,
+            target,
+            input: input.clone(),
+            error: None,
+            _sub: sub,
+        });
+        cx.notify();
+        // 描いた後でフォーカスし、名前を拡張子の手前まで選ぶ（`.gitignore` のような名前は全部）。
+        let stem_end = match initial.rfind('.') {
+            Some(i) if i > 0 => i,
+            _ => initial.len(),
         };
-        let submit = std::rc::Rc::new(submit);
-        {
-            let submit = submit.clone();
-            cx.subscribe_in(&input, window, move |_, _, e: &InputEvent, window, cx| {
-                if matches!(e, InputEvent::PressEnter { .. }) {
-                    submit(window, cx);
-                }
-            })
-            .detach();
-        }
-        let ok = cx.t("core.tree.ok");
-        window.open_dialog(cx, move |dialog, _, cx| {
-            let submit = submit.clone();
-            let message = error.read(cx).clone();
-            dialog
-                .title(title.clone())
-                .w(gpui_kit::px(420.))
-                .child(
-                    v_flex().gap_2().child(Input::new(&input)).children(message.map(|m| {
-                        div()
-                            .text_xs()
-                            .text_color(cx.token(Token::HighlightError))
-                            .child(m)
-                    })),
-                )
-                .footer(
-                    h_flex().justify_end().child(
-                        Button::new("name-ok")
-                            .primary()
-                            .small()
-                            .label(ok.clone())
-                            .on_click(move |_, window, cx| submit(window, cx)),
-                    ),
-                )
+        window.defer(cx, move |window, cx| {
+            input.update(cx, |s, cx| {
+                s.focus(window, cx);
+                s.set_selected_range(0..stem_end, cx);
+            });
         });
     }
+
+    /// 入力を確定する。`on_blur` のとき、空・変わっていない・正しくない名前なら黙って取り消す。
+    pub(crate) fn commit_edit(&mut self, on_blur: bool, cx: &mut Context<Self>) {
+        let Some(edit) = self.editing.as_ref() else { return };
+        let name = edit.input.read(cx).value().trim().to_string();
+        let (kind, dir, target) = (edit.kind, edit.dir.clone(), edit.target.clone());
+        let unchanged = target
+            .as_ref()
+            .and_then(|t| t.file_name())
+            .is_some_and(|n| n.to_string_lossy() == name);
+        if name.is_empty() || unchanged {
+            self.cancel_edit(cx);
+            return;
+        }
+        let result: Result<(), String> = if !valid_name(&name) {
+            Err(cx.t("core.tree.invalid-name").to_string())
+        } else if dir.join(&name).exists() {
+            Err(cx
+                .t_args("core.tree.exists", &[("name", name.clone().into())])
+                .to_string())
+        } else {
+            let new = dir.join(&name);
+            match kind {
+                EditKind::NewFolder => std::fs::create_dir_all(&new).map_err(|e| e.to_string()),
+                EditKind::NewFile => std::fs::write(&new, "")
+                    .map(|_| cx.emit(ProjectPanelEvent::OpenFile(new.clone())))
+                    .map_err(|e| e.to_string()),
+                EditKind::Rename => match &target {
+                    Some(old) => std::fs::rename(old, &new)
+                        .map(|_| cx.emit(ProjectPanelEvent::Renamed(old.clone(), new.clone())))
+                        .map_err(|e| e.to_string()),
+                    None => Ok(()),
+                },
+            }
+        };
+        match result {
+            Ok(()) => {
+                self.editing = None;
+                self.refresh_dir(&dir, cx);
+                self.selected = Some(dir.join(&name));
+            }
+            // ほかを押して離れたときは、エラーを出したまま残さず取り消す。
+            Err(_) if on_blur => {
+                self.cancel_edit(cx);
+                return;
+            }
+            Err(e) => {
+                if let Some(edit) = self.editing.as_mut() {
+                    edit.error = Some(e);
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn cancel_edit(&mut self, cx: &mut Context<Self>) {
+        if self.editing.take().is_some() {
+            cx.notify();
+        }
+    }
+}
+
+/// ツリーの中で入力している名前。
+pub(crate) struct Edit {
+    pub kind: EditKind,
+    /// 作る（変える）場所のフォルダ。
+    pub dir: PathBuf,
+    /// 名前を変えるもの。
+    pub target: Option<PathBuf>,
+    pub input: Entity<InputState>,
+    pub error: Option<String>,
+    _sub: gpui_kit::Subscription,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EditKind {
+    NewFile,
+    NewFolder,
+    Rename,
 }
 
 #[cfg(test)]
