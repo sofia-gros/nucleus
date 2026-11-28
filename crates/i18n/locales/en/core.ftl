@@ -175,3 +175,15 @@ core-search-replaced = Replaced { $count ->
         [one] 1 file
        *[other] { $files } files
     }.
+
+# Diff
+core-diff-no-changes = No changes.
+core-diff-previous-hunk = Previous Change
+core-diff-next-hunk = Next Change
+core-diff-open-file = Open File
+core-diff-hunks = { $count ->
+        [one] 1 hunk
+       *[other] { $count } hunks
+    }
+core-diff-stage-hunk = Stage Hunk
+core-diff-revert-hunk = Revert Hunk

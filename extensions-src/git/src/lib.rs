@@ -94,6 +94,22 @@ fn commit() -> Result<(), String> {
     }
 }
 
+/// 差分を開く。未ステージの変更はインデックスと、ステージ済みの変更は HEAD と比べる。
+fn show_diff(path: &str, staged: bool, code: &str) -> Result<(), String> {
+    if matches!(code, "U" | "A") && !staged {
+        return host::open_file(path, None);
+    }
+    let (spec, label) = if staged {
+        (format!("HEAD:{path}"), "HEAD")
+    } else {
+        // ステージ済みの変更がなければ、インデックスは HEAD と同じ。
+        let staged_too = with(|s| matches!(&s.status, Some(Ok(st)) if st.staged.iter().any(|e| e.path == path)));
+        (format!(":{path}"), if staged_too { "Index" } else { "HEAD" })
+    };
+    let base = git(&["show", &spec]).unwrap_or_default();
+    host::show_diff(path, &base, label)
+}
+
 /// push / fetch。時間がかかることがあるので、終わったら通知する。
 fn remote(args: &[&str], done: &str) {
     with(|s| s.busy = true);
@@ -134,6 +150,22 @@ impl Extension for Git {
     fn handle_ui_event(_view: String, key: String, event: UiEvent) -> Result<(), String> {
         match (key.as_str(), event) {
             ("message", UiEvent::Change(text)) => with(|s| s.message = text),
+            ("stage-hunk", UiEvent::Submit(patch)) => {
+                let out = host::run_process_input("git", &["apply".into(), "--cached".into(), "-".into()], &patch)?;
+                if out.status != 0 {
+                    return Err(out.stderr.trim().to_string());
+                }
+                refresh();
+                // 差分の元（インデックス）を新しくする。
+                if let Some(path) = patch
+                    .lines()
+                    .next()
+                    .and_then(|l| l.strip_prefix("diff --git a/"))
+                    .and_then(|l| l.split(" b/").next())
+                {
+                    show_diff(path, false, "M")?;
+                }
+            }
             ("message", UiEvent::Submit(text)) => {
                 with(|s| s.message = text);
                 commit()?;
@@ -168,6 +200,13 @@ impl Extension for Git {
                         notify_err(git(&["rm", "-q", "--cached", "--", path]));
                     }
                     refresh();
+                } else if let Some(rest) = k.strip_prefix("diff:") {
+                    // diff:<s|u>:<印>:<path>
+                    let mut parts = rest.splitn(3, ':');
+                    let (side, code, path) = (parts.next(), parts.next(), parts.next());
+                    if let (Some(side), Some(code), Some(path)) = (side, code, path) {
+                        show_diff(path, side == "s", code)?;
+                    }
                 } else if let Some(path) = k.strip_prefix("open:") {
                     host::open_file(path, None)?;
                 }
@@ -335,10 +374,17 @@ fn row(e: &Entry, staged: bool) -> El {
             .variant(ButtonVariant::Ghost)
             .tooltip("Stage")
     };
-    let mut item = list_item(format!("open:{}", e.path), name)
+    let side = if staged { "s" } else { "u" };
+    let mut item = list_item(format!("diff:{side}:{}:{}", e.code, e.path), name)
         .icon("file")
         .tone(Tone::Muted)
         .badge(e.code.to_string(), tone)
+        .action(
+            button(format!("open:{}", e.path))
+                .icon("file-code")
+                .variant(ButtonVariant::Ghost)
+                .tooltip("Open File"),
+        )
         .action(toggle);
     if !dir.is_empty() {
         item = item.detail(dir);

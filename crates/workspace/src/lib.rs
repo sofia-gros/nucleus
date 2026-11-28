@@ -3,6 +3,7 @@
 mod assets;
 mod close;
 mod commands;
+mod diff_views;
 mod extension_bridge;
 mod extension_view;
 mod finder;
@@ -153,6 +154,8 @@ pub struct Workspace {
     extension_errors_shown: bool,
     /// 登録済みの Extension のショートカット（Extension ID, コマンド ID）。
     extension_keys: HashSet<(String, String)>,
+    /// 開いている Diff のタブ。
+    diff_views: diff_views::DiffViews,
     /// ドックに置いた Extension のビュー。
     extension_panels: Vec<WeakEntity<extension_view::ExtensionPanel>>,
     /// 右ドックの Core のパネル（Extension のビューを前に並べ直すときに使う）。
@@ -283,6 +286,7 @@ impl Workspace {
             extension_errors_shown: false,
             extension_keys: HashSet::new(),
             extension_panels: Vec::new(),
+            diff_views: Vec::new(),
             outline_panel: outline_handle,
             terminals: first_terminal.into_iter().collect(),
             open_order: Vec::new(),
@@ -402,7 +406,11 @@ impl Workspace {
                     this.active = Some(panel.downgrade());
                     cx.notify();
                 }
-                EditorEvent::Edited => this.lsp_edited(cx),
+                EditorEvent::Edited => {
+                    this.lsp_edited(cx);
+                    let path = panel.read(cx).path().to_path_buf();
+                    this.refresh_diff(&path, cx);
+                }
                 EditorEvent::Saved => {
                     let path = panel.read(cx).path().to_path_buf();
                     this.lsp_saved(&path);

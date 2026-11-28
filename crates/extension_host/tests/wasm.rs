@@ -34,7 +34,7 @@ fn fake_ui(rx: futures::channel::mpsc::UnboundedReceiver<UiRequest>) -> Arc<Mute
                     ui.lock().unwrap().replaced = Some(text);
                     let _ = reply.send(Ok(()));
                 }
-                UiRequest::OpenFile { .. } | UiRequest::Invalidate { .. } => {}
+                _ => {}
             }
         }
     });

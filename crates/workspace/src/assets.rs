@@ -7,7 +7,7 @@ use gpui_kit::{AssetSource, Result, SharedString, assets::Assets as KitAssets, a
 icon_assets!(pub NucleusIcons, [
     Atom, ListTree, GitBranch, Terminal, CircleX, Bell, Columns2, PanelLeft, PanelRight,
     FileCode, Folder, FolderOpen, Command, Keyboard, Settings2, Package, Search,
-    TriangleAlert, ScrollText, GitPullRequest, Check, RefreshCw, Save, X, Palette, Languages, LogOut, Info, Puzzle, Replace,
+    TriangleAlert, ScrollText, GitPullRequest, Check, RefreshCw, Save, X, Palette, Languages, LogOut, Info, Puzzle, Replace, GitCompare, ArrowUp, ArrowDown,
 ]);
 
 /// gpui-kit 既定の素材 → Nucleus のアイコン の順に探す。

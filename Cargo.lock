@@ -1610,6 +1610,7 @@ dependencies = [
  "log",
  "lsp-types",
  "settings",
+ "similar",
  "tempfile",
  "theme",
 ]

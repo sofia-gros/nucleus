@@ -6,6 +6,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+similar.workspace = true
 gpui-kit.workspace = true
 anyhow.workspace = true
 log.workspace = true

@@ -61,6 +61,14 @@ pub enum UiRequest {
     },
     /// ワークスペース内のファイルを開く（絶対パス）。
     OpenFile { path: PathBuf, line: Option<u32> },
+    /// 差分を開く（すでに開いていれば元を新しくする）。
+    ShowDiff {
+        extension: String,
+        path: PathBuf,
+        rel: String,
+        base: String,
+        base_label: String,
+    },
     /// Extension の状態が変わった。そのビューを描き直す。
     Invalidate { extension: String },
 }
@@ -533,18 +541,70 @@ impl host::Host for State {
             .map_err(|_| "UI が終わっている".to_string())
     }
 
+    fn run_process_input(
+        &mut self,
+        command: String,
+        args: Vec<String>,
+        input: String,
+    ) -> Result<ProcessOutput, String> {
+        self.process(command, args, Some(input))
+    }
+
+    fn show_diff(&mut self, path: String, base: String, base_label: String) -> Result<(), String> {
+        self.require("ui", "tab")?;
+        let abs = self.resolve(&path)?;
+        let root = self.host.root().unwrap_or_default();
+        let rel = abs
+            .strip_prefix(&root)
+            .unwrap_or(&abs)
+            .to_string_lossy()
+            .replace('\\', "/");
+        self.host
+            .ui
+            .unbounded_send(UiRequest::ShowDiff {
+                extension: self.manifest.id.clone(),
+                path: abs,
+                rel,
+                base,
+                base_label,
+            })
+            .map_err(|_| "UI が終わっている".to_string())
+    }
+
     fn run_process(&mut self, command: String, args: Vec<String>) -> Result<ProcessOutput, String> {
+        self.process(command, args, None)
+    }
+}
+
+impl State {
+    fn process(&mut self, command: String, args: Vec<String>, input: Option<String>) -> Result<ProcessOutput, String> {
         if command.contains('/') || command.contains('\\') {
             return Err("コマンドは名前で指定する（パス不可）".into());
         }
         self.require("process", &command)?;
+        use std::process::Stdio;
         let mut cmd = std::process::Command::new(&command);
-        cmd.args(&args).stdin(std::process::Stdio::null());
+        cmd.args(&args)
+            .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() })
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         if let Some(root) = self.host.root() {
             cmd.current_dir(root);
         }
         cmd.env("GIT_TERMINAL_PROMPT", "0");
-        let out = cmd.output().map_err(|e| format!("`{command}`: {e}"))?;
+        let mut child = cmd.spawn().map_err(|e| format!("`{command}`: {e}"))?;
+        // 出力の読み取りと詰まらないように、書き込みは別のスレッドで行う。
+        let writer = match (input, child.stdin.take()) {
+            (Some(input), Some(mut stdin)) => Some(std::thread::spawn(move || {
+                use std::io::Write as _;
+                let _ = stdin.write_all(input.as_bytes());
+            })),
+            _ => None,
+        };
+        let out = child.wait_with_output().map_err(|e| format!("`{command}`: {e}"))?;
+        if let Some(w) = writer {
+            let _ = w.join();
+        }
         let text = |b: &[u8]| String::from_utf8_lossy(&b[..b.len().min(PROCESS_OUTPUT_LIMIT)]).into_owned();
         Ok(ProcessOutput {
             status: out.status.code().unwrap_or(-1),

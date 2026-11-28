@@ -149,3 +149,12 @@ core-search-whole-word = 単語単位
 core-search-replace-all = すべて置換
 core-search-confirm-replace = { $files } 個のファイルの { $count } 件を「{ $replacement }」に置き換えますか？
 core-search-replaced = { $files } 個のファイルの { $count } 件を置き換えました。
+
+# Diff
+core-diff-no-changes = 変更はありません。
+core-diff-previous-hunk = 前の変更
+core-diff-next-hunk = 次の変更
+core-diff-open-file = ファイルを開く
+core-diff-hunks = { $count } 個の変更
+core-diff-stage-hunk = 変更をステージ
+core-diff-revert-hunk = 変更を元に戻す

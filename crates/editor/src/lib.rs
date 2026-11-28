@@ -1,5 +1,7 @@
 //! エディタ（docs/ARCHITECTURE.md §7）。テキストの正本は gpui-kit の EditorState が持つ Rope だけ。
 
+pub mod diff;
+pub mod diff_view;
 pub mod file;
 mod find_panel;
 

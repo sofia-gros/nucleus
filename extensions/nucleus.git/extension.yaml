@@ -6,7 +6,7 @@ publisher: nucleus
 description: Source control with git — changes, staging and commits.
 api: { core: 1, ui: 1 }
 permissions:
-  ui: [panel.right]
+  ui: [panel.right, tab]
   process: [git]
 contributes:
   views:

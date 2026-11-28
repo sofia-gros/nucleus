@@ -137,6 +137,13 @@ impl Workspace {
                 let pos = line.map(|l| lsp_types::Position::new(l.saturating_sub(1), 0));
                 self.open_file_at(path, pos, window, cx);
             }
+            UiRequest::ShowDiff {
+                extension,
+                path,
+                rel,
+                base,
+                base_label,
+            } => self.show_diff(extension, path, rel, base, base_label, window, cx),
             UiRequest::Invalidate { extension } => {
                 self.extension_panels.retain(|p| p.upgrade().is_some());
                 for p in self.extension_panels.iter().filter_map(WeakEntity::upgrade) {

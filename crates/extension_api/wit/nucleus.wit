@@ -47,6 +47,14 @@ interface host {
 
     /// ワークスペース内のファイルをエディタで開く（権限不要）。`line` は 1 始まり。
     open-file: func(path: string, line: option<u32>) -> result<_, string>;
+
+    /// 標準入力を渡して外部コマンドを実行する（`run-process` と同じ権限）。
+    run-process-input: func(command: string, args: list<string>, input: string) -> result<process-output, string>;
+
+    /// ファイルの差分をタブで開く（`ui: [tab]`）。`base` と、いまの内容（開いていればエディタの中身）を比べる。
+    /// すでに開いていれば `base` を新しくする。「変更をステージ」を押すと、
+    /// `handle-ui-event("diff", "stage-hunk", submit(<パッチ>))` が呼ばれる（パッチは `git apply --cached` の形）。
+    show-diff: func(path: string, base: string, base-label: string) -> result<_, string>;
 }
 
 /// 宣言的な UI（ui@1）。Extension は要素の木を返すだけで、描画は Nucleus が gpui-kit の部品で行う。
