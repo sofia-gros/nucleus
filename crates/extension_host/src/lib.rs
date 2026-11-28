@@ -7,5 +7,5 @@ mod store;
 
 pub use loader::{FailedExtension, LoadedExtension, discover, user_extensions_dir};
 pub use manifest::Manifest;
-pub use runtime::{ActiveDocument, HostContext, NoticeLevel, UiRequest};
-pub use store::{ExtensionCommand, ExtensionStore, Stage, WasmHost, start};
+pub use runtime::{ActiveDocument, HostContext, NoticeLevel, UiRequest, WorkspaceEvent, ui};
+pub use store::{ExtensionCommand, ExtensionStore, ExtensionView, Stage, WasmHost, start};

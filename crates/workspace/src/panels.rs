@@ -21,7 +21,6 @@ pub enum PanelKind {
     Search,
     Welcome,
     Output,
-    Git,
     Outline,
 }
 
@@ -31,7 +30,6 @@ impl PanelKind {
             PanelKind::Search => "nucleus.search",
             PanelKind::Welcome => "nucleus.welcome",
             PanelKind::Output => "nucleus.output",
-            PanelKind::Git => "nucleus.git",
             PanelKind::Outline => "nucleus.outline",
         }
     }
@@ -41,7 +39,6 @@ impl PanelKind {
             PanelKind::Search => "core.panel.search",
             PanelKind::Welcome => "core.welcome.tab",
             PanelKind::Output => "core.panel.output",
-            PanelKind::Git => "core.panel.git",
             PanelKind::Outline => "core.panel.outline",
         }
     }
@@ -51,7 +48,6 @@ impl PanelKind {
             PanelKind::Search => IconName::Search,
             PanelKind::Welcome => IconName::Atom,
             PanelKind::Output => IconName::ScrollText,
-            PanelKind::Git => IconName::GitBranch,
             PanelKind::Outline => IconName::ListTree,
         }
     }

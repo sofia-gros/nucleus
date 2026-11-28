@@ -121,6 +121,7 @@ core-command-toggle-terminal = ターミナル: 表示の切り替え
 ## 拡張機能・テーマ・表示言語
 core-status-extensions-starting = 拡張機能を読み込み中…
 core-notify-extension-failed = 拡張機能を読み込めませんでした: { $error }
+core-extension-view-failed = このビューを表示できませんでした。
 core-notify-extension-not-running = 拡張機能 { $id } は動いていません。
 core-notify-extension-command-failed = コマンド { $command } が失敗しました: { $error }
 core-command-select-theme = テーマ: テーマを選択…

@@ -34,6 +34,7 @@ fn fake_ui(rx: futures::channel::mpsc::UnboundedReceiver<UiRequest>) -> Arc<Mute
                     ui.lock().unwrap().replaced = Some(text);
                     let _ = reply.send(Ok(()));
                 }
+                UiRequest::OpenFile { .. } | UiRequest::Invalidate { .. } => {}
             }
         }
     });
@@ -63,7 +64,10 @@ fn word_tools_counts_and_sorts() {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     let notices = ui.lock().unwrap().notices.clone();
-    assert_eq!(notices, vec![(NoticeLevel::Info, "notes.txt: 3 words, 2 lines, 18 characters".into())]);
+    assert_eq!(
+        notices,
+        vec![(NoticeLevel::Info, "notes.txt: 3 words, 2 lines, 18 characters".into())]
+    );
 
     block_on(ext.run_command("word-tools.sort-lines")).unwrap().unwrap();
     assert_eq!(ui.lock().unwrap().replaced.as_deref(), Some("banana\npear apple\n"));
@@ -80,4 +84,84 @@ fn host_functions_check_permissions() {
     let err = block_on(ext.run_command("word-tools.sort-lines")).unwrap().unwrap_err();
     assert!(err.contains("editor: [edit]"), "{err}");
     assert!(ui.lock().unwrap().replaced.is_none());
+}
+
+const GIT_WASM: &[u8] = include_bytes!("../../../extensions/nucleus.git/git.wasm");
+const GIT_MANIFEST: &str = include_str!("../../../extensions/nucleus.git/extension.yaml");
+
+fn texts(nodes: &[extension_host::ui::Node]) -> Vec<String> {
+    use extension_host::ui::Kind;
+    nodes
+        .iter()
+        .filter_map(|n| match &n.kind {
+            Kind::Text(t) => Some(t.content.clone()),
+            Kind::ListItem(l) => Some(l.label.clone()),
+            Kind::Section(s) => Some(s.title.clone()),
+            Kind::Button(b) => b.label.clone(),
+            _ => None,
+        })
+        .collect()
+}
+
+/// ui@1: Git Extension が要素の木を返し、イベントで状態が変わる。
+#[test]
+fn git_view_renders_and_stages() {
+    if std::process::Command::new("git").arg("--version").output().is_err() {
+        eprintln!("git がないので飛ばす");
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let git = |args: &[&str]| {
+        let ok = std::process::Command::new("git")
+            .args(args)
+            .current_dir(d.path())
+            .output()
+            .unwrap()
+            .status
+            .success();
+        assert!(ok, "git {args:?}");
+    };
+    git(&["init", "-q", "-b", "main"]);
+    std::fs::write(d.path().join("a.txt"), "hello\n").unwrap();
+
+    let manifest = Manifest::from_yaml(GIT_MANIFEST).unwrap();
+    assert!(manifest.validate().is_empty(), "{:?}", manifest.validate());
+    let (host, rx) = HostContext::new();
+    host.set_workspace_root(Some(d.path().to_path_buf()));
+    let _ui = fake_ui_any(rx);
+    let (ext, ready) = runtime::spawn(manifest, Arc::from(GIT_WASM), host);
+    block_on(ready).unwrap().expect("activate");
+
+    let nodes = block_on(ext.render("changes")).unwrap().unwrap();
+    runtime::validate_tree(&nodes).unwrap();
+    let t = texts(&nodes);
+    assert!(t.contains(&"Unstaged Changes".to_string()), "{t:?}");
+    assert!(t.contains(&"a.txt".to_string()), "{t:?}");
+
+    block_on(ext.ui_event("changes", "stage-all", extension_host::ui::UiEvent::Click))
+        .unwrap()
+        .unwrap();
+    let nodes = block_on(ext.render("changes")).unwrap().unwrap();
+    let staged = nodes.iter().any(|n| {
+        matches!(&n.kind, extension_host::ui::Kind::Section(s) if s.title == "Staged Changes" && s.count == Some(1))
+    });
+    assert!(staged, "{:?}", texts(&nodes));
+}
+
+/// 返事だけする UI（通知や描き直しの依頼は捨てる）。
+fn fake_ui_any(rx: futures::channel::mpsc::UnboundedReceiver<UiRequest>) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let mut rx = rx;
+        while let Some(req) = block_on(rx.next()) {
+            match req {
+                UiRequest::ActiveDocument { reply } => {
+                    let _ = reply.send(None);
+                }
+                UiRequest::ReplaceActiveText { reply, .. } => {
+                    let _ = reply.send(Err("none".into()));
+                }
+                _ => {}
+            }
+        }
+    })
 }

@@ -1,0 +1,19 @@
+[package]
+name = "nucleus-git"
+version = "1.0.0"
+edition = "2024"
+publish = false
+
+# Nucleus 本体の workspace には入れない（WASM 向けに別にビルドする）。
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+nucleus-extension-api = { path = "../../crates/extension_api" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

@@ -55,6 +55,7 @@ cargo run -p nucleus -- path/to/project
 | `Ctrl+Shift+V`（ターミナル内） | 貼り付け |
 | `F12` | 定義へ移動 |
 | `Ctrl+Alt+S` | 行を並べ替える（組み込み Extension「Word Tools」） |
+| `Ctrl+Alt+B` → Git | 変更の一覧・ステージ・コミット（組み込み Extension「Git」、コミットは `Ctrl+Enter`） |
 | `Ctrl+B` / `Ctrl+J` / `Ctrl+Alt+B` | 左 / 下 / 右のドックを開閉 |
 | `Ctrl+Q` | 終了 |
 
@@ -87,7 +88,7 @@ MIT または Apache-2.0。同梱フォントのライセンスは `assets/fonts
 
 ## Extension を作る
 
-Extension は `extension.yaml`（名前・権限・提供するもの）と、必要なら WASM 1つでできています。WASM を持つ Extension は Rust で書けます（例: `extensions-src/word-tools`）。
+Extension は `extension.yaml`（名前・権限・提供するもの）と、必要なら WASM 1つでできています。WASM を持つ Extension は Rust で書けます（例: コマンドだけの `extensions-src/word-tools`、ドックに画面を出す `extensions-src/git`）。
 
 ```bash
 rustup target add wasm32-wasip2

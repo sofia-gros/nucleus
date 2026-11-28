@@ -27,7 +27,9 @@ impl Extension for WordTools {
                 Ok(())
             }
             "word-tools.sort-lines" => {
-                let Some(doc) = host::active_document() else { return Ok(()) };
+                let Some(doc) = host::active_document() else {
+                    return Ok(());
+                };
                 let trailing_newline = doc.text.ends_with('\n');
                 let mut lines: Vec<&str> = doc.text.lines().collect();
                 lines.sort_unstable();

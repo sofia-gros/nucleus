@@ -77,6 +77,38 @@ pub struct Contributes {
     /// 言語サーバーの起動方法（`language` 権限の `servers`）。
     #[serde(default)]
     pub language_servers: Vec<LanguageServerContribution>,
+    /// ドックに置くビュー（ui@1、`ui: [panel.<場所>]` の権限）。
+    #[serde(default)]
+    pub views: Vec<ViewContribution>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ViewLocation {
+    Left,
+    Right,
+    Bottom,
+}
+
+impl ViewLocation {
+    pub fn permission(self) -> &'static str {
+        match self {
+            ViewLocation::Left => "panel.left",
+            ViewLocation::Right => "panel.right",
+            ViewLocation::Bottom => "panel.bottom",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ViewContribution {
+    pub id: String,
+    pub title: String,
+    /// Lucide のアイコン名（kebab-case）。
+    #[serde(default)]
+    pub icon: Option<String>,
+    pub location: ViewLocation,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -245,12 +277,27 @@ impl Manifest {
             errors.push("contributes.commands を実行するには main（WASM）が必要".into());
         }
         for c in &self.contributes.commands {
-            if !c.id.starts_with(&format!("{}.", self.id.split_once('.').map_or("", |(_, n)| n))) {
+            if !c
+                .id
+                .starts_with(&format!("{}.", self.id.split_once('.').map_or("", |(_, n)| n)))
+            {
                 errors.push(format!(
                     "コマンド `{}` は `{}.` で始める",
                     c.id,
                     self.id.split_once('.').map_or("", |(_, n)| n)
                 ));
+            }
+        }
+        for v in &self.contributes.views {
+            if !self.has("ui", v.location.permission()) {
+                errors.push(format!(
+                    "ビュー `{}` を置くには `ui: [{}]` の権限が必要",
+                    v.id,
+                    v.location.permission()
+                ));
+            }
+            if self.main.is_none() {
+                errors.push(format!("ビュー `{}` を描くには main（WASM）が必要", v.id));
             }
         }
         if self.uses_ui() && self.api.ui.is_none() {

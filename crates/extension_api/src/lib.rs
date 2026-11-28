@@ -1,4 +1,4 @@
-//! Nucleus の Extension を Rust で書くための SDK（core@1）。
+//! Nucleus の Extension を Rust で書くための SDK（core@1 と ui@1）。
 //!
 //! ```ignore
 //! use nucleus_extension_api::{Extension, export_extension, host};
@@ -26,16 +26,29 @@ pub mod bindings {
     });
 }
 
-pub use bindings::nucleus::extension::host;
+pub mod ui;
+
 use bindings::Guest;
+pub use bindings::nucleus::extension::events::WorkspaceEvent;
+pub use bindings::nucleus::extension::host;
+use bindings::nucleus::extension::ui as wit_ui;
 
-
-/// Extension が実装するもの。`activate` は省略できる。
+/// Extension が実装するもの。使わないものは省略できる。
 pub trait Extension {
     fn activate() -> Result<(), String> {
         Ok(())
     }
-    fn run_command(id: String) -> Result<(), String>;
+    fn run_command(id: String) -> Result<(), String> {
+        Err(format!("unknown command `{id}`"))
+    }
+    fn on_event(_event: WorkspaceEvent) {}
+    /// ビューの中身（ui@1）。[`ui::El`] で組み立てる。
+    fn render(_view: String) -> ui::El {
+        ui::v_stack()
+    }
+    fn handle_ui_event(_view: String, _key: String, _event: ui::UiEvent) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 #[doc(hidden)]
@@ -47,6 +60,15 @@ impl<T: Extension> Guest for __Adapter<T> {
     }
     fn run_command(id: String) -> Result<(), String> {
         T::run_command(id)
+    }
+    fn on_event(event: WorkspaceEvent) {
+        T::on_event(event)
+    }
+    fn render(view: String) -> Vec<wit_ui::Node> {
+        T::render(view).flatten()
+    }
+    fn handle_ui_event(view: String, key: String, event: wit_ui::UiEvent) -> Result<(), String> {
+        T::handle_ui_event(view, key, event)
     }
 }
 

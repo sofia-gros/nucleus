@@ -1,5 +1,5 @@
-// Nucleus Extension API — core@1（docs/ARCHITECTURE.md §4.3）。
-// 追加だけ行い、壊す変更はメジャー版でだけ行う。UI の API（ui@N）は別の interface で版を上げる。
+// Nucleus Extension API — core@1 と ui@1（docs/ARCHITECTURE.md §4.3, §4.4）。
+// 追加だけ行い、壊す変更はメジャー版でだけ行う。UI の API は `ui` interface にまとめ、manifest の api.ui で版を宣言する。
 package nucleus:extension@1.0.0;
 
 /// Host（Nucleus）が Extension に提供する関数。呼ぶには extension.yaml で権限を宣言する。
@@ -44,14 +44,152 @@ interface host {
 
     /// 外部コマンドを実行する（`process: [コマンド名]` に挙げたものだけ）。作業ディレクトリはワークスペース。
     run-process: func(command: string, args: list<string>) -> result<process-output, string>;
+
+    /// ワークスペース内のファイルをエディタで開く（権限不要）。`line` は 1 始まり。
+    open-file: func(path: string, line: option<u32>) -> result<_, string>;
+}
+
+/// 宣言的な UI（ui@1）。Extension は要素の木を返すだけで、描画は Nucleus が gpui-kit の部品で行う。
+/// 色は役割（tone）か Token 名だけで指定する。寸法は段階値だけ。
+interface ui {
+    /// 色の役割。テーマの Token に対応する。
+    enum tone { default, muted, accent, success, warning, danger, info }
+
+    /// 寸法の段階。
+    enum size { none, xs, sm, md, lg }
+
+    enum direction { horizontal, vertical }
+
+    enum button-variant { primary, secondary, ghost, danger }
+
+    record stack-props {
+        direction: direction,
+        gap: size,
+        padding: size,
+        /// 親の残りの場所を埋める。
+        grow: bool,
+        /// 子を両端に寄せる（横並びのとき）。
+        spread: bool,
+    }
+
+    record text-props {
+        content: string,
+        tone: tone,
+        size: size,
+        bold: bool,
+        mono: bool,
+    }
+
+    record icon-props {
+        /// Lucide のアイコン名（kebab-case、Nucleus が持っているもの）。
+        name: string,
+        tone: tone,
+    }
+
+    record button-props {
+        /// イベントで返ってくる名前。
+        key: string,
+        label: option<string>,
+        icon: option<string>,
+        style: button-variant,
+        disabled: bool,
+        tooltip: option<string>,
+    }
+
+    record input-props {
+        key: string,
+        placeholder: string,
+        /// 最初の値。入力中の値は Nucleus が持つ。
+        value: string,
+        /// 増やすと、入力欄の中身を `value` で置き換える（コミット後に空にする、など）。
+        revision: u32,
+        multiline: bool,
+    }
+
+    record list-item-props {
+        key: string,
+        label: string,
+        detail: option<string>,
+        icon: option<string>,
+        icon-tone: tone,
+        /// 右端の短い印（例: Git の M / A / D）。
+        badge: option<string>,
+        badge-tone: tone,
+        selected: bool,
+        /// 行にマウスを乗せたときに出すボタン。
+        actions: list<button-props>,
+    }
+
+    record section-props {
+        key: string,
+        title: string,
+        count: option<u32>,
+        collapsed: bool,
+        actions: list<button-props>,
+    }
+
+    variant kind {
+        stack(stack-props),
+        /// 子をスクロールできる領域に入れる。
+        scroll,
+        text(text-props),
+        icon(icon-props),
+        button(button-props),
+        input(input-props),
+        list-item(list-item-props),
+        /// 折りたためる見出し（子が中身）。
+        section(section-props),
+        divider,
+        /// 読み込み中の表示。
+        skeleton,
+    }
+
+    /// 木は平らな配列で表す。0 番が根、`children` は配列の添字。
+    record node {
+        kind: kind,
+        children: list<u32>,
+    }
+
+    variant ui-event {
+        click,
+        /// Enter（複数行なら Ctrl+Enter）。
+        submit(string),
+        /// 入力の値が変わった。
+        change(string),
+        /// 見出しの開閉。
+        toggle(bool),
+    }
+}
+
+interface events {
+    /// ワークスペースで起きたこと。
+    variant workspace-event {
+        /// フォルダを開いた（閉じた）。
+        root-changed(option<string>),
+        /// ファイルを保存した（ワークスペースからの相対パス）。
+        file-saved(string),
+        /// ウィンドウにフォーカスが戻った。
+        window-focused,
+    }
 }
 
 world extension {
     import host;
+    use ui.{node, ui-event};
+    use events.{workspace-event};
 
     /// 読み込み後に一度だけ呼ばれる。
     export activate: func() -> result<_, string>;
 
     /// `contributes.commands` で宣言したコマンドが実行されたときに呼ばれる。
     export run-command: func(id: string) -> result<_, string>;
+
+    /// ワークスペースで何か起きたときに呼ばれる。
+    export on-event: func(event: workspace-event);
+
+    /// `contributes.views` で宣言したビューの中身（ui@1）。状態が変わるたびに呼ばれる。
+    export render: func(view: string) -> list<node>;
+
+    /// ビューの中で起きたイベント（ui@1）。終わるとビューが描き直される。
+    export handle-ui-event: func(view: string, key: string, event: ui-event) -> result<_, string>;
 }

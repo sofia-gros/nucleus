@@ -4,6 +4,7 @@ mod assets;
 mod close;
 mod commands;
 mod extension_bridge;
+mod extension_view;
 mod finder;
 mod language_support;
 mod palette;
@@ -148,6 +149,10 @@ pub struct Workspace {
     extension_errors_shown: bool,
     /// 登録済みの Extension のショートカット（Extension ID, コマンド ID）。
     extension_keys: HashSet<(String, String)>,
+    /// ドックに置いた Extension のビュー。
+    extension_panels: Vec<WeakEntity<extension_view::ExtensionPanel>>,
+    /// 右ドックの Core のパネル（Extension のビューを前に並べ直すときに使う）。
+    outline_panel: Option<std::sync::Arc<dyn gpui_kit::base::dock::PanelView>>,
     terminals: Vec<WeakEntity<terminal::TerminalView>>,
     /// 開いているファイル（タブを開いた順。セッションの保存用）。
     open_order: Vec<PathBuf>,
@@ -172,6 +177,7 @@ impl Workspace {
         let panel = |kind, cx: &mut Context<DockArea>| panel_handle(cx.new(|cx| CorePanel::new(kind, cx)));
         let mut skin_handle = None;
         let mut first_terminal = None;
+        let mut outline_handle = None;
         let problems_panel = cx.new(problems::ProblemsPanel::new);
         let problems_handle = panel_handle(problems_panel.clone());
         let dock_area = cx.new(|cx| {
@@ -185,8 +191,8 @@ impl Workspace {
             let terminal = panel_handle(terminal_view);
             let problems = problems_handle;
             let output = panel(PanelKind::Output, cx);
-            let git = panel(PanelKind::Git, cx);
             let outline = panel(PanelKind::Outline, cx);
+            outline_handle = Some(outline.clone());
 
             area.set_center(DockLayout::tabs().panel_view(welcome, cx), window, cx);
             area.set_dock(
@@ -206,7 +212,7 @@ impl Workspace {
             );
             area.set_dock(
                 DockPlacement::Right,
-                DockLayout::tabs().panel_view(git, cx).panel_view(outline, cx),
+                DockLayout::tabs().panel_view(outline, cx),
                 window,
                 cx,
             );
@@ -242,7 +248,14 @@ impl Workspace {
         ));
         let focus = cx.focus_handle();
         focus.focus(window, cx);
-        cx.defer_in(window, |this: &mut Workspace, window, cx| this.start_extension_bridge(window, cx));
+        cx.defer_in(window, |this: &mut Workspace, window, cx| {
+            this.start_extension_bridge(window, cx)
+        });
+        subs.push(cx.observe_window_activation(window, |_, window, cx| {
+            if window.is_window_active() {
+                extension_host::WasmHost::broadcast(extension_host::WorkspaceEvent::WindowFocused, cx);
+            }
+        }));
         let this = cx.entity().downgrade();
         window.on_window_should_close(cx, move |window, cx| {
             this.update(cx, |ws, cx| ws.should_close_window(window, cx))
@@ -260,6 +273,8 @@ impl Workspace {
             close_confirmed: false,
             extension_errors_shown: false,
             extension_keys: HashSet::new(),
+            extension_panels: Vec::new(),
+            outline_panel: outline_handle,
             terminals: first_terminal.into_iter().collect(),
             open_order: Vec::new(),
             loading: HashSet::new(),
@@ -282,6 +297,11 @@ impl Workspace {
                 t.update(cx, |t, _| t.set_cwd(Some(path.clone())));
             }
             self.file_index = None;
+            self.sync_extension_root(cx);
+            extension_host::WasmHost::broadcast(
+                extension_host::WorkspaceEvent::RootChanged(Some(path.display().to_string())),
+                cx,
+            );
             self.watch_settings(window, cx);
             self.save_session(cx);
         } else {
@@ -374,6 +394,7 @@ impl Workspace {
                 EditorEvent::Saved => {
                     let path = panel.read(cx).path().to_path_buf();
                     this.lsp_saved(&path);
+                    this.extension_file_saved(&path, cx);
                     cx.notify();
                 }
                 EditorEvent::Changed => {
@@ -457,6 +478,7 @@ impl Workspace {
         if store.stage == extension_host::Stage::Ready && !self.extension_errors_shown {
             self.extension_errors_shown = true;
             extension_bridge::bind_keys(&mut self.extension_keys, cx);
+            self.add_extension_views(window, cx);
             // Extension の読み込みより先に開いていたファイルも、言語サーバーにつなぐ。
             let open: Vec<_> = self.editors.values().filter_map(WeakEntity::upgrade).collect();
             for e in open {
@@ -733,9 +755,11 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| this.open_user_settings(window, cx)))
             .on_action(cx.listener(|this, _: &NewTerminal, window, cx| this.new_terminal(window, cx)))
             .on_action(cx.listener(|this, _: &ToggleTerminal, window, cx| this.toggle_terminal(window, cx)))
-            .on_action(cx.listener(|this, a: &extension_bridge::RunExtensionCommand, window, cx| {
-                this.run_extension_command(a, window, cx)
-            }))
+            .on_action(
+                cx.listener(|this, a: &extension_bridge::RunExtensionCommand, window, cx| {
+                    this.run_extension_command(a, window, cx)
+                }),
+            )
             .on_action(
                 cx.listener(|this, _: &OpenWorkspaceSettings, window, cx| this.open_workspace_settings(window, cx)),
             )

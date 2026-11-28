@@ -297,5 +297,13 @@ l10n: l10n/                  # l10n/core.ftl, l10n/anthropic.claude.ftl …
    - `contributes.commands` はコマンドパレットに並び、`key` でショートカットも登録される。コマンド ID は `<Extension 名>.` で始める。
    - 例: 組み込みの `extensions/nucleus.word-tools`（ソースは `extensions-src/word-tools`、`build.sh` で WASM を作り直す）。単語数を数える・行を並べ替える（`Ctrl+Alt+S`）。
    - 未対応: `run-process` の時間切れ（WASM の 5 秒の外で待つ）、同時起動数の上限と優先順位、`network` 権限を使う API、Extension の言語サーバー以外からの LSP 利用、utf-16 のサーバーでの診断位置の厳密な変換。
-7. **P6 UI API:** `ui@1`、`ui_bridge`、スロット → 公式の Git Extension を UI 付きで作る
+7. **P6 UI API:** `ui@1`、`ui_bridge`、スロット → 公式の Git Extension を UI 付きで作る — **完了（最初の版）**
+   - WIT の `ui` interface（同じ `nucleus:extension@1.0.0` パッケージ。manifest の `api.ui: 1` で使うことを宣言する）。Extension は `render(view) -> list<node>` で要素の木を返し、`handle-ui-event(view, key, event)` でイベントを受け取る。木は平らな配列（0 番が根、子は添字）で、Nucleus が形を確かめてから描く（範囲外・循環・1万要素超はエラー）。
+   - 要素: `stack`（縦横・gap・padding・grow・spread）、`scroll`、`text`、`icon`、`button`、`input`（1行 / 複数行）、`list-item`（アイコン・詳細・印・ホバーで出るボタン）、`section`（折りたためる見出し・件数・ボタン）、`divider`、`skeleton`。色は役割（tone → Token）、寸法は段階値（none / xs 4 / sm 8 / md 12 / lg 16px）だけ。
+   - 入力欄の中身と見出しの開閉は Nucleus が持つ。Extension は `change` / `submit` で値を受け取り、`revision` を増やしたときだけ中身を置き換えられる（コミット後に空にする、など）。
+   - 描き直し: コマンド・UI のイベント・ワークスペースのイベント（`root-changed` / `file-saved` / `window-focused`）を処理した後に、その Extension のビューを描き直す。木は毎回まるごと返す（差分パッチは今後）。
+   - `contributes.views`（`location: left | right | bottom`、`ui: [panel.<場所>]` の権限）。段階2として、段階1の後にドックへ置き、中身は Extension の起動まで Skeleton。右ドックでは Extension のビューを先頭に並べる。
+   - ホスト関数 `open-file(path, line)` を追加（ワークスペース内だけ）。
+   - 公式の Git Extension `extensions/nucleus.git`（ソースは `extensions-src/git`、権限は `ui: [panel.right]` と `process: [git]` だけ）: 変更の一覧（未ステージ / ステージ済み、M・A・D・R・U の印）、ファイルごと・まとめてのステージと取り消し、コミット（`Ctrl+Enter`、1行目の文字数表示）、Push / Fetch、ファイルを開く、空のフォルダでの `git init`。コマンド `Git: Refresh` / `Git: Stage All Changes` / `Git: Commit Staged Changes`。
+   - 未対応: ガター（行ごとの変更の印、`editor: [decorate]`）とプロジェクトツリーの変更の印、差分表示（P7）、`tabs` / `markdown` / `code` / `canvas` などの要素、ステータスバー・タイトルバーのスロット、Extension の文言の多言語化（Git の画面は英語のみ）、描き直しの差分パッチ。
 8. **P7 仕上げ:** プロジェクト全体検索、Diff、拡張機能の管理画面、Light テーマの調整

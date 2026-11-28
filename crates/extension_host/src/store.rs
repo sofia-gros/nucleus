@@ -8,8 +8,8 @@ use theme::ExtTokenSet;
 
 use crate::{
     loader::{self, FailedExtension, LoadedExtension},
-    manifest::CommandContribution,
-    runtime::{self, HostContext, UiRequest, WasmExtension},
+    manifest::{CommandContribution, ViewContribution},
+    runtime::{self, HostContext, UiRequest, WasmExtension, WorkspaceEvent},
 };
 
 /// Extension が提供するコマンド。
@@ -50,6 +50,37 @@ impl WasmHost {
         let ext = cx.try_global::<WasmHost>()?.running.get(extension)?;
         Some(ext.run_command(command))
     }
+
+    pub fn get(extension: &str, cx: &App) -> Option<Arc<WasmExtension>> {
+        cx.try_global::<WasmHost>()?.running.get(extension).cloned()
+    }
+
+    /// 起動中か（まだ起動していないなら true、起動に失敗したら false）。
+    pub fn is_pending(extension: &str, cx: &App) -> bool {
+        cx.try_global::<WasmHost>()
+            .is_some_and(|h| !h.running.contains_key(extension) && !h.failed.iter().any(|(id, _)| id == extension))
+    }
+
+    pub fn failure(extension: &str, cx: &App) -> Option<String> {
+        let h = cx.try_global::<WasmHost>()?;
+        h.failed.iter().find(|(id, _)| id == extension).map(|(_, e)| e.clone())
+    }
+
+    /// 起動中のすべての Extension に知らせる。
+    pub fn broadcast(event: WorkspaceEvent, cx: &App) {
+        if let Some(h) = cx.try_global::<WasmHost>() {
+            for ext in h.running.values() {
+                ext.workspace_event(event.clone());
+            }
+        }
+    }
+}
+
+/// Extension が提供するビュー。
+#[derive(Clone, Debug)]
+pub struct ExtensionView {
+    pub extension: String,
+    pub view: ViewContribution,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -84,6 +115,18 @@ impl ExtensionStore {
     /// 有効な Extension が提供するテーマ。
     pub fn themes(&self) -> impl Iterator<Item = &theme::ThemeFile> {
         self.enabled().flat_map(|e| e.themes.iter())
+    }
+
+    /// 有効な Extension が提供するビュー。
+    pub fn views(&self) -> Vec<ExtensionView> {
+        self.enabled()
+            .flat_map(|e| {
+                e.manifest.contributes.views.iter().map(|v| ExtensionView {
+                    extension: e.manifest.id.clone(),
+                    view: v.clone(),
+                })
+            })
+            .collect()
     }
 
     /// 有効な Extension が提供するコマンド。

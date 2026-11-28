@@ -1,0 +1,505 @@
+//! Extension のビュー（ui@1）をドックのパネルとして描く。
+//!
+//! Extension は要素の木（平らな配列）を返すだけで、ここで gpui-kit の部品に置き換える。
+//! 色は役割（tone）から Token に、寸法は段階値から決まった値に変える。
+//! 入力欄の中身と見出しの開閉は Nucleus 側で持ち、Extension には変化だけを知らせる。
+
+use std::collections::HashMap;
+
+use gpui_kit::{
+    AnyElement, App, AppContext as _, Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable,
+    InteractiveElement as _, IntoElement, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement as _,
+    Styled, Subscription, Task, Window,
+    component::{
+        Icon, Sizable as _, WindowExt as _,
+        button::{Button, ButtonVariants as _},
+        dock::{BasePanel, Panel, PanelEvent},
+        h_flex,
+        input::{Input, InputEvent, InputState, Textarea, TextareaState},
+        notification::Notification,
+        skeleton::Skeleton,
+        v_flex,
+    },
+    div,
+    prelude::FluentBuilder as _,
+    px,
+};
+use gpui_kit::{base::StyledExt as _, component::Disableable as _};
+use i18n::Translate as _;
+use theme::{Token, TokenColors as _};
+
+use extension_host::{
+    WasmHost,
+    manifest::ViewContribution,
+    ui::{ButtonProps, ButtonVariant, Direction, InputProps, Kind, Node, Size, Tone, UiEvent},
+};
+
+enum InputHandle {
+    Single(Entity<InputState>),
+    Multi(Entity<TextareaState>),
+}
+
+struct InputSlot {
+    handle: InputHandle,
+    /// Extension が前回返した revision（これが変わったときだけ入力欄を書き換える）。
+    revision: u32,
+    _sub: Subscription,
+}
+
+pub struct ExtensionPanel {
+    pub extension: String,
+    view: ViewContribution,
+    focus: FocusHandle,
+    nodes: Option<Vec<Node>>,
+    error: Option<String>,
+    inputs: HashMap<String, InputSlot>,
+    collapsed: HashMap<String, bool>,
+    rendering: bool,
+    /// 描いている間にもう一度描く必要が出た。
+    again: bool,
+    _render_task: Option<Task<()>>,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl ExtensionPanel {
+    pub fn new(extension: String, view: ViewContribution, _window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let mut this = ExtensionPanel {
+            extension,
+            view,
+            focus: cx.focus_handle(),
+            nodes: None,
+            error: None,
+            inputs: HashMap::new(),
+            collapsed: HashMap::new(),
+            rendering: false,
+            again: false,
+            _render_task: None,
+            _subscriptions: Vec::new(),
+        };
+        // Extension の起動が終わったら最初の描画をする。
+        this._subscriptions.push(cx.observe_global::<WasmHost>(|this, cx| {
+            if this.nodes.is_none() && !this.rendering {
+                this.refresh(cx);
+            }
+        }));
+        this.refresh(cx);
+        this
+    }
+
+    /// Extension にビューの中身を描いてもらう。
+    pub fn refresh(&mut self, cx: &mut Context<Self>) {
+        if self.rendering {
+            self.again = true;
+            return;
+        }
+        let Some(ext) = WasmHost::get(&self.extension, cx) else {
+            if let Some(e) = WasmHost::failure(&self.extension, cx) {
+                self.error = Some(e);
+                cx.notify();
+            }
+            return;
+        };
+        self.rendering = true;
+        let rx = ext.render(&self.view.id);
+        self._render_task = Some(cx.spawn(async move |this, cx| {
+            let result = rx.await.unwrap_or_else(|_| Err("Extension が止まった".into()));
+            this.update(cx, |this, cx| {
+                this.rendering = false;
+                match result {
+                    Ok(nodes) => {
+                        this.nodes = Some(nodes);
+                        this.error = None;
+                    }
+                    Err(e) => {
+                        log::warn!("Extension `{}` のビュー `{}`: {e}", this.extension, this.view.id);
+                        this.error = Some(e);
+                    }
+                }
+                cx.notify();
+                if std::mem::take(&mut this.again) {
+                    this.refresh(cx);
+                }
+            })
+            .ok();
+        }));
+    }
+
+    fn send(&mut self, key: String, event: UiEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(ext) = WasmHost::get(&self.extension, cx) else {
+            return;
+        };
+        let rx = ext.ui_event(&self.view.id, &key, event);
+        cx.spawn_in(window, async move |_, cx| {
+            if let Ok(Err(e)) = rx.await {
+                cx.update(|window, cx| window.push_notification(Notification::error(e), cx))
+                    .ok();
+            }
+        })
+        .detach();
+    }
+
+    /// 入力欄を用意する（同じ key なら使い回し、Extension が値を変えたときだけ書き換える）。
+    fn input(&mut self, p: &InputProps, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let (key, placeholder, multiline) = (p.key.as_str(), p.placeholder.as_str(), p.multiline);
+        let needs_new = match self.inputs.get(key) {
+            Some(slot) => matches!(slot.handle, InputHandle::Multi(_)) != multiline,
+            None => true,
+        };
+        if needs_new {
+            let k = key.to_string();
+            let on_event =
+                move |this: &mut Self, e: &InputEvent, text: String, window: &mut Window, cx: &mut Context<Self>| {
+                    match e {
+                        InputEvent::Change => this.send(k.clone(), UiEvent::Change(text), window, cx),
+                        InputEvent::PressEnter { secondary, .. } if !multiline || *secondary => {
+                            this.send(k.clone(), UiEvent::Submit(text), window, cx)
+                        }
+                        _ => {}
+                    }
+                };
+            let (handle, sub) = if multiline {
+                let state = cx.new(|cx| {
+                    TextareaState::new(window, cx)
+                        .auto_grow(2, 6)
+                        .placeholder(placeholder.to_string())
+                });
+                let sub = cx.subscribe_in(&state, window, move |this, s, e: &InputEvent, window, cx| {
+                    let text = s.read(cx).value().to_string();
+                    on_event(this, e, text, window, cx)
+                });
+                (InputHandle::Multi(state), sub)
+            } else {
+                let state = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder.to_string()));
+                let sub = cx.subscribe_in(&state, window, move |this, s, e: &InputEvent, window, cx| {
+                    let text = s.read(cx).value().to_string();
+                    on_event(this, e, text, window, cx)
+                });
+                (InputHandle::Single(state), sub)
+            };
+            self.inputs.insert(
+                key.to_string(),
+                InputSlot {
+                    handle,
+                    // 作ったばかりの欄には必ず value を入れる。
+                    revision: p.revision.wrapping_add(1),
+                    _sub: sub,
+                },
+            );
+        }
+        let slot = self.inputs.get_mut(key).expect("just inserted");
+        if slot.revision != p.revision {
+            slot.revision = p.revision;
+            let v = p.value.clone();
+            match &slot.handle {
+                InputHandle::Single(s) => s.update(cx, |s, cx| s.set_value(v, window, cx)),
+                InputHandle::Multi(s) => s.update(cx, |s, cx| s.set_value(v, window, cx)),
+            }
+        }
+        match &slot.handle {
+            InputHandle::Single(s) => Input::new(s).small().into_any_element(),
+            InputHandle::Multi(s) => Textarea::new(s).small().into_any_element(),
+        }
+    }
+
+    fn render_node(&mut self, ix: usize, nodes: &[Node], window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let Some(node) = nodes.get(ix) else {
+            return div().into_any_element();
+        };
+        let children = |this: &mut Self, window: &mut Window, cx: &mut Context<Self>| -> Vec<AnyElement> {
+            node.children
+                .iter()
+                .map(|&c| this.render_node(c as usize, nodes, window, cx))
+                .collect()
+        };
+        match &node.kind {
+            Kind::Stack(p) => {
+                let kids = children(self, window, cx);
+                let base = match p.direction {
+                    Direction::Horizontal => h_flex().items_center(),
+                    Direction::Vertical => v_flex(),
+                };
+                base.gap(step(p.gap))
+                    .p(step(p.padding))
+                    .min_w_0()
+                    .when(p.grow, |s| s.flex_1().min_h_0())
+                    .when(p.spread, |s| s.justify_between())
+                    .children(kids)
+                    .into_any_element()
+            }
+            Kind::Scroll => {
+                let kids = children(self, window, cx);
+                div()
+                    .id(node_id(ix))
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .child(v_flex().children(kids))
+                    .into_any_element()
+            }
+            Kind::Text(p) => div()
+                .min_w_0()
+                .text_color(tone(p.tone, cx))
+                .map(|d| match p.size {
+                    Size::None | Size::Xs => d.text_xs(),
+                    Size::Sm => d.text_sm(),
+                    Size::Md => d.text_base(),
+                    Size::Lg => d.text_lg(),
+                })
+                .when(p.bold, |d| d.font_semibold())
+                .when(p.mono, |d| d.font_family("JetBrains Mono"))
+                .child(p.content.clone())
+                .into_any_element(),
+            Kind::Icon(p) => icon(&p.name).small().text_color(tone(p.tone, cx)).into_any_element(),
+            Kind::Button(p) => self.button(p, ix, false, cx).into_any_element(),
+            Kind::Input(p) => self.input(p, window, cx),
+            Kind::ListItem(p) => {
+                let key = p.key.clone();
+                let group: SharedString = format!("ext-row-{ix}").into();
+                let actions: Vec<AnyElement> = p
+                    .actions
+                    .iter()
+                    .enumerate()
+                    .map(|(i, b)| self.button(b, ix * 64 + i, true, cx).into_any_element())
+                    .collect();
+                h_flex()
+                    .id(node_id(ix))
+                    .group(group.clone())
+                    .h(px(24.))
+                    .px_2()
+                    .gap_1p5()
+                    .rounded_sm()
+                    .cursor_pointer()
+                    .text_sm()
+                    .text_color(cx.token(Token::SidebarForeground))
+                    .when(p.selected, |s| s.bg(cx.token(Token::ListActiveBackground)))
+                    .hover(|s| s.bg(cx.token(Token::ListHoverBackground)))
+                    .when_some(p.icon.as_ref(), |s, name| {
+                        s.child(icon(name).small().text_color(tone(p.icon_tone, cx)))
+                    })
+                    .child(div().flex_shrink_0().child(p.label.clone()))
+                    .when_some(p.detail.as_ref(), |s, d| {
+                        s.child(
+                            div()
+                                .min_w_0()
+                                .flex_1()
+                                .truncate()
+                                .text_xs()
+                                .text_color(cx.token(Token::MutedForeground))
+                                .child(d.clone()),
+                        )
+                    })
+                    .when(p.detail.is_none(), |s| s.child(div().flex_1()))
+                    .child(
+                        h_flex()
+                            .gap_0p5()
+                            .invisible()
+                            .group_hover(group, |s| s.visible())
+                            .children(actions),
+                    )
+                    .when_some(p.badge.as_ref(), |s, b| {
+                        s.child(
+                            div()
+                                .w(px(14.))
+                                .text_xs()
+                                .font_semibold()
+                                .text_color(tone(p.badge_tone, cx))
+                                .child(b.clone()),
+                        )
+                    })
+                    .on_click(
+                        cx.listener(move |this, _, window, cx| this.send(key.clone(), UiEvent::Click, window, cx)),
+                    )
+                    .into_any_element()
+            }
+            Kind::Section(p) => {
+                let key = p.key.clone();
+                let collapsed = *self.collapsed.entry(key.clone()).or_insert(p.collapsed);
+                let actions: Vec<AnyElement> = p
+                    .actions
+                    .iter()
+                    .enumerate()
+                    .map(|(i, b)| self.button(b, ix * 64 + i, true, cx).into_any_element())
+                    .collect();
+                let kids = if collapsed {
+                    Vec::new()
+                } else {
+                    children(self, window, cx)
+                };
+                v_flex()
+                    .child(
+                        h_flex()
+                            .id(node_id(ix))
+                            .h(px(28.))
+                            .px_1()
+                            .gap_1()
+                            .cursor_pointer()
+                            .text_xs()
+                            .font_semibold()
+                            .text_color(cx.token(Token::MutedForeground))
+                            .child(
+                                Icon::new(if collapsed {
+                                    gpui_kit::assets::IconName::ChevronRight
+                                } else {
+                                    gpui_kit::assets::IconName::ChevronDown
+                                })
+                                .xsmall(),
+                            )
+                            .child(p.title.to_uppercase())
+                            .when_some(p.count, |s, n| {
+                                s.child(
+                                    div()
+                                        .px_1p5()
+                                        .rounded_full()
+                                        .bg(cx.token(Token::MutedBackground))
+                                        .child(n.to_string()),
+                                )
+                            })
+                            .child(div().flex_1())
+                            .child(h_flex().gap_0p5().children(actions))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                let c = this.collapsed.entry(key.clone()).or_default();
+                                *c = !*c;
+                                let open = !*c;
+                                this.send(key.clone(), UiEvent::Toggle(open), window, cx);
+                                cx.notify();
+                            })),
+                    )
+                    .children(kids)
+                    .into_any_element()
+            }
+            Kind::Divider => div().h(px(1.)).w_full().bg(cx.token(Token::Border)).into_any_element(),
+            Kind::Skeleton => skeleton().into_any_element(),
+        }
+    }
+
+    fn button(&self, p: &ButtonProps, ix: usize, compact: bool, cx: &mut Context<Self>) -> Button {
+        let key = p.key.clone();
+        let mut b = Button::new(node_id(ix)).disabled(p.disabled);
+        b = match p.style {
+            ButtonVariant::Primary => b.primary(),
+            ButtonVariant::Secondary => b.outline(),
+            ButtonVariant::Ghost => b.ghost(),
+            ButtonVariant::Danger => b.danger(),
+        };
+        b = if compact { b.xsmall() } else { b.small() };
+        if let Some(name) = &p.icon {
+            b = b.icon(icon(name));
+        }
+        if let Some(l) = &p.label {
+            b = b.label(l.clone());
+        }
+        if let Some(t) = &p.tooltip {
+            b = b.tooltip(t.clone());
+        }
+        b.on_click(cx.listener(move |this, _, window, cx| {
+            cx.stop_propagation();
+            this.send(key.clone(), UiEvent::Click, window, cx)
+        }))
+    }
+}
+
+fn node_id(ix: usize) -> ElementId {
+    ElementId::NamedInteger("ext-node".into(), ix as u64)
+}
+
+fn step(s: Size) -> Pixels {
+    px(match s {
+        Size::None => 0.,
+        Size::Xs => 4.,
+        Size::Sm => 8.,
+        Size::Md => 12.,
+        Size::Lg => 16.,
+    })
+}
+
+fn tone(t: Tone, cx: &App) -> gpui_kit::Hsla {
+    cx.token(match t {
+        Tone::Default => Token::SidebarForeground,
+        Tone::Muted => Token::MutedForeground,
+        Tone::Accent => Token::ListHighlightForeground,
+        Tone::Success => Token::HighlightCreated,
+        Tone::Warning => Token::HighlightModified,
+        Tone::Danger => Token::HighlightDeleted,
+        Tone::Info => Token::HighlightInfo,
+    })
+}
+
+/// Lucide のアイコン（kebab-case の名前）。Nucleus が持っていない名前なら何も描かれない。
+fn icon(name: &str) -> Icon {
+    let ok = !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    let name = if ok { name } else { "circle-help" };
+    Icon::default().path(format!("icons/{name}.svg"))
+}
+
+fn skeleton() -> impl IntoElement {
+    v_flex()
+        .gap_2()
+        .p_3()
+        .child(Skeleton::new().h(px(14.)).w(px(140.)))
+        .child(Skeleton::new().h(px(14.)).w_full())
+        .child(Skeleton::new().h(px(14.)).w(px(200.)))
+}
+
+impl EventEmitter<PanelEvent> for ExtensionPanel {}
+
+impl Focusable for ExtensionPanel {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus.clone()
+    }
+}
+
+impl BasePanel for ExtensionPanel {
+    fn panel_name(&self) -> &'static str {
+        "nucleus.extension-view"
+    }
+
+    fn closable(&self, _: &App) -> bool {
+        false
+    }
+}
+
+impl Panel for ExtensionPanel {
+    fn title(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let title = crate::extension_bridge::command_title(&self.extension, &self.view.title, cx);
+        h_flex()
+            .gap_2()
+            .when_some(self.view.icon.as_ref(), |s, name| {
+                s.child(icon(name).small().text_color(cx.token(Token::ListHighlightForeground)))
+            })
+            .child(title)
+    }
+
+    fn inner_padding(&self, _: &App) -> bool {
+        false
+    }
+}
+
+impl Render for ExtensionPanel {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 前回の中身があれば、エラーのときもそれを出し続ける。
+        let body = if let Some(nodes) = self.nodes.take() {
+            let el = self.render_node(0, &nodes, window, cx);
+            self.nodes = Some(nodes);
+            el
+        } else if let Some(e) = self.error.clone() {
+            v_flex()
+                .p_3()
+                .gap_2()
+                .text_xs()
+                .text_color(cx.token(Token::MutedForeground))
+                .child(cx.t("core.extension.view-failed"))
+                .child(div().text_color(cx.token(Token::HighlightError)).child(e))
+                .into_any_element()
+        } else {
+            skeleton().into_any_element()
+        };
+        v_flex()
+            .size_full()
+            .bg(cx.token(Token::SidebarBackground))
+            .track_focus(&self.focus)
+            .child(body)
+    }
+}

@@ -31,7 +31,10 @@ mod bindings {
     });
 }
 
+/// ui@1 の型（Extension が返す要素の木など）。
+pub use bindings::nucleus::extension::events::WorkspaceEvent;
 use bindings::nucleus::extension::host::{self, Document, LogLevel, NotificationLevel, ProcessOutput};
+pub use bindings::nucleus::extension::ui;
 
 /// 1回の呼び出し（activate / run-command）に使える時間。
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(5);
@@ -56,6 +59,10 @@ pub enum UiRequest {
         text: String,
         reply: oneshot::Sender<Result<(), String>>,
     },
+    /// ワークスペース内のファイルを開く（絶対パス）。
+    OpenFile { path: PathBuf, line: Option<u32> },
+    /// Extension の状態が変わった。そのビューを描き直す。
+    Invalidate { extension: String },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -109,6 +116,17 @@ enum Call {
         id: String,
         reply: oneshot::Sender<Result<(), String>>,
     },
+    Render {
+        view: String,
+        reply: oneshot::Sender<Result<Vec<ui::Node>, String>>,
+    },
+    UiEvent {
+        view: String,
+        key: String,
+        event: ui::UiEvent,
+        reply: oneshot::Sender<Result<(), String>>,
+    },
+    Workspace(WorkspaceEvent),
 }
 
 /// 起動した WASM Extension。落としたらスレッドも終わる。
@@ -128,6 +146,37 @@ impl WasmExtension {
             let _ = reply.send(Err("Extension は止まっている".into()));
         }
         rx
+    }
+
+    /// ビューの中身を描く（要素の木を返す）。
+    pub fn render(&self, view: &str) -> oneshot::Receiver<Result<Vec<ui::Node>, String>> {
+        let (reply, rx) = oneshot::channel();
+        if let Err(mpsc::SendError(Call::Render { reply, .. })) = self.calls.send(Call::Render {
+            view: view.to_string(),
+            reply,
+        }) {
+            let _ = reply.send(Err("Extension は止まっている".into()));
+        }
+        rx
+    }
+
+    /// ビューの中のイベントを渡す。
+    pub fn ui_event(&self, view: &str, key: &str, event: ui::UiEvent) -> oneshot::Receiver<Result<(), String>> {
+        let (reply, rx) = oneshot::channel();
+        if let Err(mpsc::SendError(Call::UiEvent { reply, .. })) = self.calls.send(Call::UiEvent {
+            view: view.to_string(),
+            key: key.to_string(),
+            event,
+            reply,
+        }) {
+            let _ = reply.send(Err("Extension は止まっている".into()));
+        }
+        rx
+    }
+
+    /// ワークスペースで起きたことを知らせる（返事は待たない）。
+    pub fn workspace_event(&self, event: WorkspaceEvent) {
+        let _ = self.calls.send(Call::Workspace(event));
     }
 }
 
@@ -237,8 +286,8 @@ impl Instance {
         let mut store = Store::new(engine, state);
         store.limiter(|s| &mut s.limits);
         store.set_epoch_deadline(deadline_ticks());
-        let bindings =
-            bindings::Extension::instantiate(&mut store, &component, &linker).map_err(|e| format!("起動できない: {e}"))?;
+        let bindings = bindings::Extension::instantiate(&mut store, &component, &linker)
+            .map_err(|e| format!("起動できない: {e}"))?;
         Ok(Instance { store, bindings })
     }
 
@@ -252,24 +301,95 @@ impl Instance {
 
     fn serve(&mut self, calls: Receiver<Call>) {
         while let Ok(call) = calls.recv() {
-            match call {
+            self.store.set_epoch_deadline(deadline_ticks());
+            let (trap, invalidate) = match call {
                 Call::RunCommand { id, reply } => {
-                    self.store.set_epoch_deadline(deadline_ticks());
-                    let r = match self.bindings.call_run_command(&mut self.store, &id) {
-                        Ok(r) => r,
-                        Err(e) => Err(trap_message(e)),
-                    };
-                    let trapped = r.as_ref().is_err_and(|e| e.starts_with(TRAP_PREFIX));
+                    let r = flat(self.bindings.call_run_command(&mut self.store, &id));
+                    let trap = trapped(&r);
                     let _ = reply.send(r);
-                    if trapped {
-                        // 打ち切られた Instance は中身が壊れているかもしれないので、それ以上使わない。
-                        log::warn!("Extension `{}` を止めた", self.store.data().manifest.id);
-                        return;
-                    }
+                    (trap, true)
                 }
+                Call::Render { view, reply } => {
+                    let r = self
+                        .bindings
+                        .call_render(&mut self.store, &view)
+                        .map_err(trap_message)
+                        .and_then(|nodes| validate_tree(&nodes).map(|_| nodes));
+                    let trap = trapped(&r);
+                    let _ = reply.send(r);
+                    (trap, false)
+                }
+                Call::UiEvent {
+                    view,
+                    key,
+                    event,
+                    reply,
+                } => {
+                    let r = flat(self.bindings.call_handle_ui_event(&mut self.store, &view, &key, &event));
+                    let trap = trapped(&r);
+                    let _ = reply.send(r);
+                    (trap, true)
+                }
+                Call::Workspace(event) => {
+                    let r = self
+                        .bindings
+                        .call_on_event(&mut self.store, &event)
+                        .map_err(trap_message);
+                    if let Err(e) = &r {
+                        log::warn!("Extension `{}`: {e}", self.store.data().manifest.id);
+                    }
+                    (trapped(&r), true)
+                }
+            };
+            if trap {
+                // 打ち切られた Instance は中身が壊れているかもしれないので、それ以上使わない。
+                log::warn!("Extension `{}` を止めた", self.store.data().manifest.id);
+                return;
+            }
+            if invalidate && !self.store.data().manifest.contributes.views.is_empty() {
+                let data = self.store.data();
+                let _ = data.host.ui.unbounded_send(UiRequest::Invalidate {
+                    extension: data.manifest.id.clone(),
+                });
             }
         }
     }
+}
+
+fn flat(r: wasmtime::Result<Result<(), String>>) -> Result<(), String> {
+    match r {
+        Ok(r) => r,
+        Err(e) => Err(trap_message(e)),
+    }
+}
+
+fn trapped<T>(r: &Result<T, String>) -> bool {
+    r.as_ref().is_err_and(|e| e.starts_with(TRAP_PREFIX))
+}
+
+/// 要素の木の上限。
+const MAX_NODES: usize = 10_000;
+
+/// 要素の木が正しいか（添字が範囲内、親が1つ、循環しない）。
+pub fn validate_tree(nodes: &[ui::Node]) -> Result<(), String> {
+    if nodes.is_empty() {
+        return Err("要素の木が空".into());
+    }
+    if nodes.len() > MAX_NODES {
+        return Err(format!("要素が多すぎる（{MAX_NODES} まで）"));
+    }
+    let mut seen = vec![false; nodes.len()];
+    seen[0] = true;
+    for (i, n) in nodes.iter().enumerate() {
+        for &c in &n.children {
+            let c = c as usize;
+            if c >= nodes.len() || c <= i || seen[c] {
+                return Err(format!("要素 {i} の子 {c} が正しくない"));
+            }
+            seen[c] = true;
+        }
+    }
+    Ok(())
 }
 
 const TRAP_PREFIX: &str = "停止: ";
@@ -344,6 +464,9 @@ pub fn confine(root: &Path, path: &str) -> Result<PathBuf, String> {
     Ok(normal)
 }
 
+impl ui::Host for State {}
+impl bindings::nucleus::extension::events::Host for State {}
+
 impl host::Host for State {
     fn log(&mut self, level: LogLevel, message: String) {
         let id = &self.manifest.id;
@@ -399,6 +522,17 @@ impl host::Host for State {
         self.ask(|reply| UiRequest::ReplaceActiveText { text, reply })?
     }
 
+    fn open_file(&mut self, path: String, line: Option<u32>) -> Result<(), String> {
+        let path = self.resolve(&path)?;
+        if !path.is_file() {
+            return Err(format!("`{}` がない", path.display()));
+        }
+        self.host
+            .ui
+            .unbounded_send(UiRequest::OpenFile { path, line })
+            .map_err(|_| "UI が終わっている".to_string())
+    }
+
     fn run_process(&mut self, command: String, args: Vec<String>) -> Result<ProcessOutput, String> {
         if command.contains('/') || command.contains('\\') {
             return Err("コマンドは名前で指定する（パス不可）".into());
@@ -409,6 +543,7 @@ impl host::Host for State {
         if let Some(root) = self.host.root() {
             cmd.current_dir(root);
         }
+        cmd.env("GIT_TERMINAL_PROMPT", "0");
         let out = cmd.output().map_err(|e| format!("`{command}`: {e}"))?;
         let text = |b: &[u8]| String::from_utf8_lossy(&b[..b.len().min(PROCESS_OUTPUT_LIMIT)]).into_owned();
         Ok(ProcessOutput {
@@ -422,6 +557,23 @@ impl host::Host for State {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn node(children: Vec<u32>) -> ui::Node {
+        ui::Node {
+            kind: ui::Kind::Divider,
+            children,
+        }
+    }
+
+    #[test]
+    fn trees_must_be_well_formed() {
+        assert!(validate_tree(&[node(vec![1, 2]), node(vec![]), node(vec![])]).is_ok());
+        assert!(validate_tree(&[]).is_err());
+        // 範囲外・自分より前・2つの親
+        assert!(validate_tree(&[node(vec![3])]).is_err());
+        assert!(validate_tree(&[node(vec![1]), node(vec![0])]).is_err());
+        assert!(validate_tree(&[node(vec![1, 2]), node(vec![2]), node(vec![])]).is_err());
+    }
 
     #[test]
     fn paths_are_confined_to_the_workspace() {

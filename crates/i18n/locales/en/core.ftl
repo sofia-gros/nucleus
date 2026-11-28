@@ -126,6 +126,7 @@ core-command-toggle-terminal = Terminal: Toggle Terminal
 ## Extensions, themes and languages
 core-status-extensions-starting = Loading extensions…
 core-notify-extension-failed = An extension could not be loaded: { $error }
+core-extension-view-failed = This view could not be shown.
 core-notify-extension-not-running = The extension { $id } is not running.
 core-notify-extension-command-failed = The command { $command } failed: { $error }
 core-command-select-theme = Theme: Select Theme…

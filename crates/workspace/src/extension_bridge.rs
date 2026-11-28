@@ -11,9 +11,15 @@ use gpui_kit::{
 use i18n::Translate as _;
 use serde::Deserialize;
 
-use extension_host::{ActiveDocument, NoticeLevel, UiRequest, WasmHost};
+use std::path::Path;
 
-use crate::{CONTEXT, Workspace};
+use extension_host::{ActiveDocument, NoticeLevel, UiRequest, WasmHost, WorkspaceEvent, manifest::ViewLocation};
+use gpui_kit::{
+    AppContext as _, WeakEntity,
+    component::dock::{DockLayout, DockPlacement, panel_handle},
+};
+
+use crate::{CONTEXT, Workspace, extension_view::ExtensionPanel};
 
 /// Extension のコマンドを実行する（`contributes.commands`）。
 #[derive(Clone, PartialEq, Eq, Deserialize, gpui_kit::Action)]
@@ -40,7 +46,9 @@ pub fn bind_keys(bound: &mut HashSet<(String, String)>, cx: &mut App) {
                 extension: c.extension.clone(),
                 command: c.command.id.clone(),
             }),
-            gpui_kit::KeyBindingContextPredicate::parse(CONTEXT).ok().map(std::rc::Rc::new),
+            gpui_kit::KeyBindingContextPredicate::parse(CONTEXT)
+                .ok()
+                .map(std::rc::Rc::new),
             false,
             None,
             cx,
@@ -125,6 +133,18 @@ impl Workspace {
                 });
                 let _ = reply.send(doc);
             }
+            UiRequest::OpenFile { path, line } => {
+                let pos = line.map(|l| lsp_types::Position::new(l.saturating_sub(1), 0));
+                self.open_file_at(path, pos, window, cx);
+            }
+            UiRequest::Invalidate { extension } => {
+                self.extension_panels.retain(|p| p.upgrade().is_some());
+                for p in self.extension_panels.iter().filter_map(WeakEntity::upgrade) {
+                    if p.read(cx).extension == extension {
+                        p.update(cx, |p, cx| p.refresh(cx));
+                    }
+                }
+            }
             UiRequest::ReplaceActiveText { text, reply } => {
                 let r = match self.active_editor(cx) {
                     Some(e) => {
@@ -139,9 +159,65 @@ impl Workspace {
         }
     }
 
-    pub(crate) fn run_extension_command(&mut self, a: &RunExtensionCommand, window: &mut Window, cx: &mut Context<Self>) {
+    /// Extension のビューをドックに置く（段階2: 中身は Extension の起動まで Skeleton）。
+    pub(crate) fn add_extension_views(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(store) = extension_host::ExtensionStore::get(cx) else {
+            return;
+        };
+        let mut right = Vec::new();
+        for v in store.views() {
+            let placement = match v.view.location {
+                ViewLocation::Left => DockPlacement::Left,
+                ViewLocation::Right => DockPlacement::Right,
+                ViewLocation::Bottom => DockPlacement::Bottom,
+            };
+            let panel = cx.new(|cx| ExtensionPanel::new(v.extension.clone(), v.view.clone(), window, cx));
+            self.extension_panels.push(panel.downgrade());
+            if placement == DockPlacement::Right {
+                // 右ドックは Extension のビュー（Git など）を先頭にする（デザイン 08）。
+                right.push(panel_handle(panel));
+            } else {
+                self.dock_area.update(cx, |area, cx| {
+                    area.add_panel_view(panel_handle(panel), placement, None, window, cx);
+                });
+            }
+        }
+        if right.is_empty() {
+            return;
+        }
+        let outline = self.outline_panel.clone();
+        self.dock_area.update(cx, |area, cx| {
+            let open = area.is_dock_open(DockPlacement::Right);
+            let mut layout = DockLayout::tabs();
+            for h in right.into_iter().chain(outline) {
+                layout = layout.panel_view(h, cx);
+            }
+            area.set_dock(DockPlacement::Right, layout, window, cx);
+            area.set_dock_size(DockPlacement::Right, gpui_kit::px(320.), window, cx);
+            if area.is_dock_open(DockPlacement::Right) != open {
+                area.toggle_dock(DockPlacement::Right, window, cx);
+            }
+        });
+    }
+
+    /// 保存したファイルを Extension に知らせる（ワークスペースからの相対パス）。
+    pub(crate) fn extension_file_saved(&self, path: &Path, cx: &App) {
+        let root = self.project.read(cx).root();
+        let rel = root.as_deref().and_then(|r| path.strip_prefix(r).ok()).unwrap_or(path);
+        WasmHost::broadcast(WorkspaceEvent::FileSaved(rel.display().to_string()), cx);
+    }
+
+    pub(crate) fn run_extension_command(
+        &mut self,
+        a: &RunExtensionCommand,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(rx) = WasmHost::run_command(&a.extension, &a.command, cx) else {
-            let msg = cx.t_args("core.notify.extension-not-running", &[("id", a.extension.clone().into())]);
+            let msg = cx.t_args(
+                "core.notify.extension-not-running",
+                &[("id", a.extension.clone().into())],
+            );
             window.push_notification(Notification::warning(msg), cx);
             return;
         };

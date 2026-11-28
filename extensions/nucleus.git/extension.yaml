@@ -1,0 +1,18 @@
+# 公式の Git Extension（ソースは extensions-src/git）。ui@1 で右ドックにビューを置く。
+id: nucleus.git
+name: Git
+version: 1.0.0
+publisher: nucleus
+description: Source control with git — changes, staging and commits.
+api: { core: 1, ui: 1 }
+permissions:
+  ui: [panel.right]
+  process: [git]
+contributes:
+  views:
+    - { id: changes, title: Git, icon: git-branch, location: right }
+  commands:
+    - { id: git.refresh, title: "Git: Refresh" }
+    - { id: git.stage-all, title: "Git: Stage All Changes" }
+    - { id: git.commit, title: "Git: Commit Staged Changes" }
+main: git.wasm
