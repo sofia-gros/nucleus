@@ -4,13 +4,16 @@ use std::path::PathBuf;
 
 use gpui_kit::{
     App, Context, EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement, ParentElement, Render,
-    SharedString, StatefulInteractiveElement as _, Styled, Window, div, prelude::FluentBuilder as _, px,
+    SharedString, StatefulInteractiveElement as _, Styled, Window,
     assets::IconName,
     component::{
         Icon, Sizable as _,
         dock::{BasePanel, Panel, PanelEvent},
         h_flex, v_flex,
     },
+    div,
+    prelude::FluentBuilder as _,
+    px,
 };
 use i18n::Translate as _;
 use lsp_types::{Diagnostic, DiagnosticSeverity, Position};
@@ -28,7 +31,11 @@ pub struct ProblemsPanel {
 
 impl ProblemsPanel {
     pub fn new(cx: &mut Context<Self>) -> Self {
-        ProblemsPanel { focus: cx.focus_handle(), root: None, items: Vec::new() }
+        ProblemsPanel {
+            focus: cx.focus_handle(),
+            root: None,
+            items: Vec::new(),
+        }
     }
 
     pub fn set(&mut self, root: Option<PathBuf>, items: Vec<(PathBuf, Vec<Diagnostic>)>, cx: &mut Context<Self>) {
@@ -66,7 +73,11 @@ impl Panel for ProblemsPanel {
         let n = self.count();
         h_flex()
             .gap_2()
-            .child(Icon::new(IconName::TriangleAlert).small().text_color(cx.token(Token::ListHighlightForeground)))
+            .child(
+                Icon::new(IconName::TriangleAlert)
+                    .small()
+                    .text_color(cx.token(Token::ListHighlightForeground)),
+            )
             .child(cx.t("core.panel.problems"))
             .when(n > 0, |d| {
                 d.child(
@@ -91,24 +102,52 @@ impl Render for ProblemsPanel {
         let mut list = v_flex().w_full().py_1();
         if self.items.is_empty() {
             list = list.child(
-                div().p_3().text_sm().text_color(cx.token(Token::MutedForeground)).child(cx.t("core.problems.none")),
+                div()
+                    .p_3()
+                    .text_sm()
+                    .text_color(cx.token(Token::MutedForeground))
+                    .child(cx.t("core.problems.none")),
             );
         }
         let mut row_ix = 0usize;
         for (path, diags) in &self.items {
-            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
             let dir = path
                 .parent()
-                .map(|p| self.root.as_deref().and_then(|r| p.strip_prefix(r).ok()).unwrap_or(p).display().to_string())
+                .map(|p| {
+                    self.root
+                        .as_deref()
+                        .and_then(|r| p.strip_prefix(r).ok())
+                        .unwrap_or(p)
+                        .display()
+                        .to_string()
+                })
                 .unwrap_or_default();
             list = list.child(
                 h_flex()
                     .h(px(24.))
                     .px_3()
                     .gap_2()
-                    .child(Icon::new(IconName::ChevronDown).size(px(14.)).text_color(cx.token(Token::MutedForeground)))
-                    .child(Icon::new(IconName::FileCode).small().text_color(cx.token(Token::ListHighlightForeground)))
-                    .child(div().text_sm().font_weight(gpui_kit::FontWeight::MEDIUM).text_color(cx.token(Token::Foreground)).child(name))
+                    .child(
+                        Icon::new(IconName::ChevronDown)
+                            .size(px(14.))
+                            .text_color(cx.token(Token::MutedForeground)),
+                    )
+                    .child(
+                        Icon::new(IconName::FileCode)
+                            .small()
+                            .text_color(cx.token(Token::ListHighlightForeground)),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(gpui_kit::FontWeight::MEDIUM)
+                            .text_color(cx.token(Token::Foreground))
+                            .child(name),
+                    )
                     .child(div().text_xs().text_color(cx.token(Token::MutedForeground)).child(dir)),
             );
             for d in diags {
@@ -134,7 +173,7 @@ impl Render for ProblemsPanel {
                         .child(Icon::new(icon).small().text_color(cx.token(color)))
                         .child(
                             div()
-                                .flex_shrink()
+                                .flex_shrink(1.)
                                 .min_w_0()
                                 .overflow_hidden()
                                 .whitespace_nowrap()
@@ -143,9 +182,16 @@ impl Render for ProblemsPanel {
                                 .text_color(cx.token(Token::Foreground))
                                 .child(message),
                         )
-                        .child(div().text_xs().text_color(cx.token(Token::MutedForeground)).child(source))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.token(Token::MutedForeground))
+                                .child(source),
+                        )
                         .child(div().text_xs().text_color(cx.token(Token::MutedForeground)).child(at))
-                        .on_click(cx.listener(move |_, _, _, cx| cx.emit(ProblemsEvent::Open(target.0.clone(), target.1)))),
+                        .on_click(
+                            cx.listener(move |_, _, _, cx| cx.emit(ProblemsEvent::Open(target.0.clone(), target.1))),
+                        ),
                 );
                 row_ix += 1;
             }

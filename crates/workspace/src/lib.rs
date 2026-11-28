@@ -4,8 +4,10 @@ mod assets;
 mod close;
 mod commands;
 mod finder;
+mod language_support;
 mod palette;
 mod panels;
+mod problems;
 mod project_panel;
 mod prompt;
 mod session;
@@ -150,6 +152,10 @@ pub struct Workspace {
     loading: HashSet<PathBuf>,
     /// セッション復元で最後にアクティブにするファイル。
     pending_active: Option<PathBuf>,
+    /// 読み込み後に移動する位置（定義へのジャンプ、Problems から開いたとき）。
+    pending_positions: HashMap<PathBuf, lsp_types::Position>,
+    lsp: language_support::LanguageSupport,
+    problems: Entity<problems::ProblemsPanel>,
     last_saved_session: Option<session::Session>,
     settings_watcher: Option<project::DirWatcher>,
     _settings_task: Option<Task<()>>,
@@ -163,6 +169,8 @@ impl Workspace {
         let panel = |kind, cx: &mut Context<DockArea>| panel_handle(cx.new(|cx| CorePanel::new(kind, cx)));
         let mut skin_handle = None;
         let mut first_terminal = None;
+        let problems_panel = cx.new(problems::ProblemsPanel::new);
+        let problems_handle = panel_handle(problems_panel.clone());
         let dock_area = cx.new(|cx| {
             let skin = DockSkin::new(cx);
             skin_handle = Some(skin.clone());
@@ -172,7 +180,7 @@ impl Workspace {
             let terminal_view = cx.new(|cx| terminal::TerminalView::new(None, cx));
             first_terminal = Some(terminal_view.downgrade());
             let terminal = panel_handle(terminal_view);
-            let problems = panel(PanelKind::Problems, cx);
+            let problems = problems_handle;
             let output = panel(PanelKind::Output, cx);
             let git = panel(PanelKind::Git, cx);
             let outline = panel(PanelKind::Outline, cx);
@@ -222,6 +230,13 @@ impl Workspace {
                 this.on_extensions_loaded(window, cx);
             }),
         );
+        subs.push(cx.subscribe_in(
+            &problems_panel,
+            window,
+            |this, _, e: &problems::ProblemsEvent, window, cx| match e {
+                problems::ProblemsEvent::Open(path, pos) => this.open_file_at(path.clone(), Some(*pos), window, cx),
+            },
+        ));
         let focus = cx.focus_handle();
         focus.focus(window, cx);
         let this = cx.entity().downgrade();
@@ -244,6 +259,9 @@ impl Workspace {
             open_order: Vec::new(),
             loading: HashSet::new(),
             pending_active: None,
+            pending_positions: HashMap::new(),
+            lsp: Default::default(),
+            problems: problems_panel,
             last_saved_session: None,
             settings_watcher: None,
             _settings_task: None,
@@ -347,9 +365,13 @@ impl Workspace {
                     this.active = Some(panel.downgrade());
                     cx.notify();
                 }
-                // 言語サーバーとの同期は P5 の組み込みで行う（language_support.rs）。
-                EditorEvent::Edited => {}
-                EditorEvent::Changed | EditorEvent::Saved => {
+                EditorEvent::Edited => this.lsp_edited(cx),
+                EditorEvent::Saved => {
+                    let path = panel.read(cx).path().to_path_buf();
+                    this.lsp_saved(&path);
+                    cx.notify();
+                }
+                EditorEvent::Changed => {
                     if this.active.as_ref().is_some_and(|a| a.entity_id() == panel.entity_id()) {
                         cx.notify();
                     }
@@ -373,8 +395,46 @@ impl Workspace {
         });
         let focus = panel.read(cx).focus_handle(cx);
         focus.focus(window, cx);
+        if let Some(pos) = self.pending_positions.remove(panel.read(cx).path()) {
+            panel.update(cx, |e, cx| e.go_to(pos, window, cx));
+        }
+        self.lsp_attach(panel, window, cx);
         self.save_session(cx);
         cx.notify();
+    }
+
+    /// ファイルを開き、指定した位置へ移動する。
+    pub(crate) fn open_file_at(
+        &mut self,
+        path: PathBuf,
+        position: Option<lsp_types::Position>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(existing) = self.editors.get(&path).and_then(WeakEntity::upgrade) {
+            let id = PanelId::from(existing.entity_id());
+            self.dock_area.update(cx, |area, cx| area.select_panel(id, window, cx));
+            if let Some(pos) = position {
+                existing.update(cx, |e, cx| e.go_to(pos, window, cx));
+            }
+            return;
+        }
+        if let Some(pos) = position {
+            self.pending_positions.insert(path.clone(), pos);
+        }
+        self.open_file(path, window, cx);
+    }
+
+    /// Problems パネルを最新の診断で描き直す。
+    pub(crate) fn refresh_problems(&mut self, cx: &mut Context<Self>) {
+        let root = self.project.read(cx).root();
+        let items: Vec<_> = self
+            .lsp
+            .diagnostics
+            .iter()
+            .map(|(p, d)| (p.clone(), d.clone()))
+            .collect();
+        self.problems.update(cx, |p, cx| p.set(root, items, cx));
     }
 
     fn active_editor(&self, cx: &App) -> Option<Entity<EditorPanel>> {
@@ -391,6 +451,14 @@ impl Workspace {
         };
         if store.stage == extension_host::Stage::Ready && !self.extension_errors_shown {
             self.extension_errors_shown = true;
+            // Extension の読み込みより先に開いていたファイルも、言語サーバーにつなぐ。
+            let open: Vec<_> = self.editors.values().filter_map(WeakEntity::upgrade).collect();
+            for e in open {
+                self.lsp_attach(e, window, cx);
+            }
+            let Some(store) = extension_host::ExtensionStore::get(cx) else {
+                return;
+            };
             let failed: Vec<String> = store
                 .failed
                 .iter()
@@ -563,14 +631,27 @@ impl Workspace {
                 .right(item(None, "UTF-8", cx))
                 .right(item(None, language, cx));
         }
+        for (name, status) in &self.lsp.status {
+            let (icon, label) = match status {
+                language_support::ServerStatus::Starting => (IconName::RefreshCw, format!("{name}…")),
+                language_support::ServerStatus::Ready => (IconName::Check, name.clone()),
+                language_support::ServerStatus::Busy(m) => {
+                    let m: String = m.chars().take(32).collect();
+                    (IconName::RefreshCw, format!("{name}: {m}"))
+                }
+                language_support::ServerStatus::Failed => (IconName::CircleX, name.clone()),
+            };
+            bar = bar.right(item(Some(icon), label, cx));
+        }
+        let (errors, warnings) = self.lsp.counts();
         bar.left(item(
             Some(IconName::CircleX),
-            cx.t_args("core.status.errors", &[("count", 0.into())]),
+            cx.t_args("core.status.errors", &[("count", errors.into())]),
             cx,
         ))
         .left(item(
             Some(IconName::TriangleAlert),
-            cx.t_args("core.status.warnings", &[("count", 0.into())]),
+            cx.t_args("core.status.warnings", &[("count", warnings.into())]),
             cx,
         ))
         .right(item(Some(IconName::Bell), "", cx))

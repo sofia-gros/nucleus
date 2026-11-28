@@ -20,7 +20,6 @@ use theme::{Token, TokenColors as _};
 pub enum PanelKind {
     Search,
     Welcome,
-    Problems,
     Output,
     Git,
     Outline,
@@ -31,7 +30,6 @@ impl PanelKind {
         match self {
             PanelKind::Search => "nucleus.search",
             PanelKind::Welcome => "nucleus.welcome",
-            PanelKind::Problems => "nucleus.problems",
             PanelKind::Output => "nucleus.output",
             PanelKind::Git => "nucleus.git",
             PanelKind::Outline => "nucleus.outline",
@@ -42,7 +40,6 @@ impl PanelKind {
         match self {
             PanelKind::Search => "core.panel.search",
             PanelKind::Welcome => "core.welcome.tab",
-            PanelKind::Problems => "core.panel.problems",
             PanelKind::Output => "core.panel.output",
             PanelKind::Git => "core.panel.git",
             PanelKind::Outline => "core.panel.outline",
@@ -53,7 +50,6 @@ impl PanelKind {
         match self {
             PanelKind::Search => IconName::Search,
             PanelKind::Welcome => IconName::Atom,
-            PanelKind::Problems => IconName::TriangleAlert,
             PanelKind::Output => IconName::ScrollText,
             PanelKind::Git => IconName::GitBranch,
             PanelKind::Outline => IconName::ListTree,
@@ -124,7 +120,7 @@ impl Render for CorePanel {
 fn coming_soon(kind: PanelKind, cx: &App) -> impl IntoElement {
     let panel = cx.t(kind.title_key());
     let bg = match kind {
-        PanelKind::Problems | PanelKind::Output => Token::Background,
+        PanelKind::Output => Token::Background,
         _ => Token::SidebarBackground,
     };
     v_flex()

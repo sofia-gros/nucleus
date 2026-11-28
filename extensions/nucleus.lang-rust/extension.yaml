@@ -1,0 +1,15 @@
+# Rust のサポート。言語サーバー（rust-analyzer）は PATH にあるものを使う。
+id: nucleus.lang-rust
+name: Rust
+version: 1.0.0
+publisher: nucleus
+description: Rust language support via rust-analyzer (diagnostics, completion, hover, go to definition).
+api: { core: 1 }
+permissions:
+  language: [grammars, servers]
+  process: [rust-analyzer]
+contributes:
+  languages:
+    - { name: rust, extensions: [rs] }
+  language_servers:
+    - { language: rust, command: rust-analyzer }

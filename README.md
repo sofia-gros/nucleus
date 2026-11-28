@@ -19,6 +19,8 @@ Core は小さく速く保ち、機能はすべて Extension で足します。
 | `crates/editor` | エディタパネル（gpui-kit の code editor、読み書き、改行コードの保持） |
 | `crates/terminal` | ターミナル（alacritty_terminal、テーマの ANSI 色） |
 | `crates/settings` | 設定（既定 / ユーザー / フォルダの3層、コメント付き JSON） |
+| `crates/lsp` | LSP クライアント（JSON-RPC、専用スレッドで読み書き） |
+| `crates/extension_host` | Extension の読み込みと検証、起動後の段階的な反映 |
 | `crates/workspace` | メインウィンドウ（TitleBar / DockArea / StatusBar）、パネル、コマンドパレット、ファイル検索、セッション |
 
 ## ビルドと実行
@@ -50,6 +52,7 @@ cargo run -p nucleus -- path/to/project
 | `Ctrl+,` | 設定ファイルを開く |
 | `Ctrl+`` ` `` / `Ctrl+Shift+T` | ターミナルの表示切り替え / 新しいターミナル |
 | `Ctrl+Shift+V`（ターミナル内） | 貼り付け |
+| `F12` | 定義へ移動 |
 | `Ctrl+B` / `Ctrl+J` / `Ctrl+Alt+B` | 左 / 下 / 右のドックを開閉 |
 | `Ctrl+Q` | 終了 |
 

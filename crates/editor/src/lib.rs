@@ -15,7 +15,7 @@ use gpui_kit::{
         Icon, Sizable as _,
         dock::{BasePanel, Panel, PanelEvent},
         h_flex,
-        input::{Editor, EditorState, InputEvent, Position, Replace, Search, TabSize},
+        input::{Editor, EditorState, GoToDefinition, InputEvent, Position, Replace, Search, TabSize},
     },
     div, px,
 };
@@ -53,7 +53,10 @@ const CONTEXT: &str = "EditorPanel";
 
 pub fn init(cx: &mut App) {
     find_panel::init(cx);
-    cx.bind_keys([KeyBinding::new("ctrl-s", Save, Some(CONTEXT))]);
+    cx.bind_keys([
+        KeyBinding::new("ctrl-s", Save, Some(CONTEXT)),
+        KeyBinding::new("f12", GoToDefinition, Some(CONTEXT)),
+    ]);
 }
 
 /// ワークスペースに伝えるイベント。

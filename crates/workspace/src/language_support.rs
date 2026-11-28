@@ -67,15 +67,27 @@ impl DocSync {
         }
         self.synced.set(v);
         self.lsp_version.set(self.lsp_version.get() + 1);
-        self.server.notify::<DidChangeTextDocument>(lsp_types::DidChangeTextDocumentParams {
-            text_document: lsp_types::VersionedTextDocumentIdentifier { uri: self.uri.clone(), version: self.lsp_version.get() },
-            content_changes: vec![lsp_types::TextDocumentContentChangeEvent { range: None, range_length: None, text: text.to_string() }],
-        });
+        self.server
+            .notify::<DidChangeTextDocument>(lsp_types::DidChangeTextDocumentParams {
+                text_document: lsp_types::VersionedTextDocumentIdentifier {
+                    uri: self.uri.clone(),
+                    version: self.lsp_version.get(),
+                },
+                content_changes: vec![lsp_types::TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: text.to_string(),
+                }],
+            });
     }
 
     fn position(&self, text: &Rope, offset: usize) -> Position {
         let p = text.offset_to_position(offset);
-        if self.server.uses_utf32() { p } else { utf32_to_utf16(text, p) }
+        if self.server.uses_utf32() {
+            p
+        } else {
+            utf32_to_utf16(text, p)
+        }
     }
 
     fn text_position(&self, text: &Rope, offset: usize) -> TextDocumentPositionParams {
@@ -88,7 +100,7 @@ impl DocSync {
 
 /// コードポイント単位の位置を UTF-16 単位にする（UTF-16 しか話せないサーバー向け）。
 fn utf32_to_utf16(text: &Rope, p: Position) -> Position {
-    let line = text.line(p.line as usize);
+    let line = text.slice_line(p.line as usize);
     let units: usize = line.chars().take(p.character as usize).map(char::len_utf16).sum();
     Position::new(p.line, units as u32)
 }
@@ -122,12 +134,17 @@ impl LanguageSupport {
 fn server_for(language: &str, cx: &App) -> Option<ServerConfig> {
     let store = extension_host::ExtensionStore::get(cx)?;
     store.enabled().find_map(|e| {
-        e.manifest.contributes.language_servers.iter().find(|s| s.language == language).map(|s| ServerConfig {
-            name: s.command.clone(),
-            command: s.command.clone(),
-            args: s.args.clone(),
-            initialization_options: s.initialization_options.clone(),
-        })
+        e.manifest
+            .contributes
+            .language_servers
+            .iter()
+            .find(|s| s.language == language)
+            .map(|s| ServerConfig {
+                name: s.command.clone(),
+                command: s.command.clone(),
+                args: s.args.clone(),
+                initialization_options: s.initialization_options.clone(),
+            })
     })
 }
 
@@ -135,9 +152,15 @@ impl Workspace {
     /// エディタを開いたとき: 言語サーバーがあれば起動（または既存のものに接続）する。
     pub(crate) fn lsp_attach(&mut self, editor: Entity<EditorPanel>, window: &mut Window, cx: &mut Context<Self>) {
         let language = editor.read(cx).language().to_string();
-        let Some(config) = server_for(&language, cx) else { return };
+        let Some(config) = server_for(&language, cx) else {
+            return;
+        };
         let path = editor.read(cx).path().to_path_buf();
-        let root = self.project.read(cx).root().unwrap_or_else(|| path.parent().map(Path::to_path_buf).unwrap_or_default());
+        let root = self
+            .project
+            .read(cx)
+            .root()
+            .unwrap_or_else(|| path.parent().map(Path::to_path_buf).unwrap_or_default());
         let key = (config.name.clone(), root.clone());
         match self.lsp.servers.get_mut(&key) {
             Some(Slot::Running(server)) => {
@@ -147,7 +170,9 @@ impl Workspace {
             Some(Slot::Starting(waiting)) => waiting.push(editor.downgrade()),
             Some(Slot::Failed) => {}
             None => {
-                self.lsp.servers.insert(key.clone(), Slot::Starting(vec![editor.downgrade()]));
+                self.lsp
+                    .servers
+                    .insert(key.clone(), Slot::Starting(vec![editor.downgrade()]));
                 self.lsp.status.insert(config.name.clone(), ServerStatus::Starting);
                 let (tx, mut rx) = futures::channel::mpsc::unbounded::<ServerNotification>();
                 let name = config.name.clone();
@@ -157,7 +182,10 @@ impl Workspace {
                     let name = name.clone();
                     async move |this, cx| {
                         while let Some(n) = rx.next().await {
-                            if this.update_in(cx, |this, window, cx| this.lsp_notification(&name, n, window, cx)).is_err() {
+                            if this
+                                .update_in(cx, |this, window, cx| this.lsp_notification(&name, n, window, cx))
+                                .is_err()
+                            {
                                 break;
                             }
                         }
@@ -203,7 +231,13 @@ impl Workspace {
         cx.notify();
     }
 
-    fn lsp_open_doc(&mut self, server: Arc<LanguageServer>, editor: Entity<EditorPanel>, window: &mut Window, cx: &mut Context<Self>) {
+    fn lsp_open_doc(
+        &mut self,
+        server: Arc<LanguageServer>,
+        editor: Entity<EditorPanel>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let path = editor.read(cx).path().to_path_buf();
         let Ok(uri) = lsp::path_to_uri(&path) else { return };
         let text = editor.read(cx).state().read(cx).text().clone();
@@ -226,8 +260,11 @@ impl Workspace {
 
         // 言語機能の連携口を、エディタ部品（gpui-kit）に登録する。
         let caps = &server.capabilities;
-        let triggers: Vec<String> =
-            caps.completion_provider.as_ref().and_then(|c| c.trigger_characters.clone()).unwrap_or_default();
+        let triggers: Vec<String> = caps
+            .completion_provider
+            .as_ref()
+            .and_then(|c| c.trigger_characters.clone())
+            .unwrap_or_default();
         let has_completion = caps.completion_provider.is_some();
         let has_hover = caps.hover_provider.is_some();
         let has_definition = caps.definition_provider.is_some();
@@ -237,7 +274,10 @@ impl Workspace {
             e.state().update(cx, |s, cx| {
                 let lsp = s.lsp_mut();
                 if has_completion {
-                    lsp.completion_provider = Some(Rc::new(LspCompletion { doc: doc.clone(), triggers }));
+                    lsp.completion_provider = Some(Rc::new(LspCompletion {
+                        doc: doc.clone(),
+                        triggers,
+                    }));
                 }
                 if has_hover {
                     lsp.hover_provider = Some(Rc::new(LspHover { doc: doc.clone() }));
@@ -246,12 +286,15 @@ impl Workspace {
                     lsp.definition_provider = Some(Rc::new(LspDefinition { doc: doc.clone() }));
                     lsp.show_document = Some(Rc::new(move |params, window, cx| {
                         // 別のファイルへのジャンプは Workspace が開く。同じファイルなら gpui-kit が移動する。
-                        let Some(target) = lsp::uri_to_path(&params.uri) else { return false };
+                        let Some(target) = lsp::uri_to_path(&params.uri) else {
+                            return false;
+                        };
                         if target == this_path {
                             return false;
                         }
                         let pos = params.selection.map(|r| r.start).unwrap_or_default();
-                        ws.update(cx, |ws, cx| ws.open_file_at(target, Some(pos), window, cx)).is_ok()
+                        ws.update(cx, |ws, cx| ws.open_file_at(target, Some(pos), window, cx))
+                            .is_ok()
                     }));
                 }
                 cx.notify();
@@ -286,25 +329,29 @@ impl Workspace {
 
     pub(crate) fn lsp_saved(&mut self, path: &Path) {
         if let Some(doc) = self.lsp.docs.get(path) {
-            doc.server.notify::<DidSaveTextDocument>(lsp_types::DidSaveTextDocumentParams {
-                text_document: TextDocumentIdentifier { uri: doc.uri.clone() },
-                text: None,
-            });
+            doc.server
+                .notify::<DidSaveTextDocument>(lsp_types::DidSaveTextDocumentParams {
+                    text_document: TextDocumentIdentifier { uri: doc.uri.clone() },
+                    text: None,
+                });
         }
     }
 
     pub(crate) fn lsp_closed(&mut self, path: &Path) {
         if let Some(doc) = self.lsp.docs.remove(path) {
-            doc.server.notify::<DidCloseTextDocument>(lsp_types::DidCloseTextDocumentParams {
-                text_document: TextDocumentIdentifier { uri: doc.uri.clone() },
-            });
+            doc.server
+                .notify::<DidCloseTextDocument>(lsp_types::DidCloseTextDocumentParams {
+                    text_document: TextDocumentIdentifier { uri: doc.uri.clone() },
+                });
         }
     }
 
     fn lsp_notification(&mut self, server: &str, n: ServerNotification, window: &mut Window, cx: &mut Context<Self>) {
         match n.method.as_str() {
             "textDocument/publishDiagnostics" => {
-                let Ok(p) = serde_json::from_value::<lsp_types::PublishDiagnosticsParams>(n.params) else { return };
+                let Ok(p) = serde_json::from_value::<lsp_types::PublishDiagnosticsParams>(n.params) else {
+                    return;
+                };
                 let Some(path) = lsp::uri_to_path(&p.uri) else { return };
                 if let Some(editor) = self.editors.get(&path).and_then(WeakEntity::upgrade) {
                     editor.update(cx, |e, cx| e.set_diagnostics(&p.diagnostics, cx));
@@ -317,7 +364,9 @@ impl Workspace {
                 self.refresh_problems(cx);
             }
             "window/showMessage" => {
-                let Ok(p) = serde_json::from_value::<lsp_types::ShowMessageParams>(n.params) else { return };
+                let Ok(p) = serde_json::from_value::<lsp_types::ShowMessageParams>(n.params) else {
+                    return;
+                };
                 let text = format!("{server}: {}", p.message);
                 let note = match p.typ {
                     lsp_types::MessageType::ERROR => Notification::error(text),
@@ -327,7 +376,9 @@ impl Workspace {
                 window.push_notification(note, cx);
             }
             "$/progress" => {
-                let Ok(p) = serde_json::from_value::<lsp_types::ProgressParams>(n.params) else { return };
+                let Ok(p) = serde_json::from_value::<lsp_types::ProgressParams>(n.params) else {
+                    return;
+                };
                 let lsp_types::ProgressParamsValue::WorkDone(w) = p.value;
                 let status = match w {
                     lsp_types::WorkDoneProgress::Begin(b) => ServerStatus::Busy(b.title),
@@ -368,7 +419,10 @@ impl CompletionProvider for LspCompletion {
         };
         let server = self.doc.server.clone();
         cx.background_spawn(async move {
-            Ok(server.request::<Completion>(params).await?.unwrap_or(CompletionResponse::Array(Vec::new())))
+            Ok(server
+                .request::<Completion>(params)
+                .await?
+                .unwrap_or(CompletionResponse::Array(Vec::new())))
         })
     }
 
@@ -383,7 +437,13 @@ struct LspHover {
 }
 
 impl HoverProvider for LspHover {
-    fn hover(&self, text: &Rope, offset: usize, _: &mut Window, cx: &mut App) -> Task<Result<Option<lsp_types::Hover>>> {
+    fn hover(
+        &self,
+        text: &Rope,
+        offset: usize,
+        _: &mut Window,
+        cx: &mut App,
+    ) -> Task<Result<Option<lsp_types::Hover>>> {
         self.doc.sync(text);
         let params = HoverParams {
             text_document_position_params: self.doc.text_position(text, offset),
@@ -420,5 +480,10 @@ impl DefinitionProvider for LspDefinition {
 }
 
 fn to_link(loc: lsp_types::Location) -> LocationLink {
-    LocationLink { origin_selection_range: None, target_uri: loc.uri, target_range: loc.range, target_selection_range: loc.range }
+    LocationLink {
+        origin_selection_range: None,
+        target_uri: loc.uri,
+        target_range: loc.range,
+        target_selection_range: loc.range,
+    }
 }

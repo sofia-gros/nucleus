@@ -127,6 +127,7 @@ impl Workspace {
         let path = editor.read(cx).path().to_path_buf();
         self.editors.remove(&path);
         self.open_order.retain(|p| *p != path);
+        self.lsp_closed(&path);
         if self
             .active
             .as_ref()
