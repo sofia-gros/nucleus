@@ -178,8 +178,13 @@ impl Workspace {
                 .menu(t("core.command.find-file", cx), Box::new(FindFile))
                 .menu(t("core.menu-item.go-to-definition", cx), Box::new(GoToDefinition))
         });
-        let extensions =
-            menu("extensions", cx).on_click(cx.listener(|this, _, window, cx| this.open_extensions(window, cx)));
+        // ほかのメニューと同じく、押したら開く一覧にする（Windows ではタイトルバーの上のクリックが
+        // ウィンドウの移動に取られて、ボタンとしては反応しないことがあるため）。
+        let c = ctx.clone();
+        let extensions = menu("extensions", cx).dropdown_menu(move |m, _, cx| {
+            m.action_context(c.clone())
+                .menu(t("core.command.open-extensions", cx), Box::new(crate::OpenExtensions))
+        });
         let c = ctx;
         let help = menu("help", cx).dropdown_menu(move |m, _, cx| {
             m.action_context(c.clone())

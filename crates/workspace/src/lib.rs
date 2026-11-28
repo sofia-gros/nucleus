@@ -339,7 +339,7 @@ impl Workspace {
     }
 
     pub fn open_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        let path = path.canonicalize().unwrap_or(path);
+        let path = simplify_path(path.canonicalize().unwrap_or(path));
         if path.is_dir() {
             self.project.update(cx, |p, cx| p.set_root(path.clone(), cx));
             for t in self.terminals.iter().filter_map(WeakEntity::upgrade) {
@@ -386,6 +386,8 @@ impl Workspace {
 
     /// ファイルを開く。開いていればそのタブに切り替える。読み込みはバックグラウンド。
     fn open_file(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        // 前回のセッションに `\\?\` 付きのパスが残っていることがある。
+        let path = simplify_path(path);
         if let Some(existing) = self.editors.get(&path).and_then(WeakEntity::upgrade) {
             let id = PanelId::from(existing.entity_id());
             self.dock_area.update(cx, |area, cx| area.select_panel(id, window, cx));
@@ -900,5 +902,39 @@ impl Render for Workspace {
             .child(div().flex_1().min_h_0().child(self.dock_area.clone()))
             .child(self.render_status_bar(cx))
             .children(self.render_palette(cx))
+    }
+}
+
+/// Windows の `canonicalize` が付ける `\\?\` を外す（`\\?\C:\work` → `C:\work`）。
+/// 付いたままだと、表示が読みにくく、ターミナル（PowerShell）や外部のプログラムがそのフォルダを使えない。
+pub fn simplify_path(path: PathBuf) -> PathBuf {
+    let s = path.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\") {
+        let b = rest.as_bytes();
+        if b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' {
+            return PathBuf::from(rest);
+        }
+        if let Some(unc) = rest.strip_prefix(r"UNC\") {
+            return PathBuf::from(format!(r"\\{unc}"));
+        }
+    }
+    path
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::*;
+
+    #[test]
+    fn verbatim_prefixes_are_removed() {
+        assert_eq!(
+            simplify_path(PathBuf::from(r"\\?\A:\Project\x")),
+            PathBuf::from(r"A:\Project\x")
+        );
+        assert_eq!(
+            simplify_path(PathBuf::from(r"\\?\UNC\srv\share")),
+            PathBuf::from(r"\\srv\share")
+        );
+        assert_eq!(simplify_path(PathBuf::from("/home/a")), PathBuf::from("/home/a"));
     }
 }

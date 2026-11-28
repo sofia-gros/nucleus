@@ -19,6 +19,9 @@ pub fn init(cx: &mut App) -> Vec<String> {
     apply(&loaded.settings, None, cx);
     apply_keymap(&loaded.settings, cx);
     cx.set_global(ActiveSettings(Arc::new(loaded.settings)));
+    for w in &loaded.warnings {
+        log::warn!("{w}");
+    }
     loaded.errors
 }
 
@@ -177,6 +180,9 @@ impl Workspace {
         cx.spawn_in(window, async move |_, cx| {
             let loaded = load.await;
             cx.update(|window, cx| {
+                for w in &loaded.warnings {
+                    log::warn!("{w}");
+                }
                 for e in &loaded.errors {
                     let msg = cx.t_args("core.notify.settings-error", &[("error", e.clone().into())]);
                     window.push_notification(Notification::error(msg), cx);

@@ -26,7 +26,7 @@ impl ActiveSettings {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Settings {
     /// テーマの名前（例: "Nucleus One Dark" / "Nucleus One Light"）。
     pub theme: String,
@@ -64,7 +64,7 @@ impl Default for Settings {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct EditorSettings {
     pub font_family: String,
     pub font_size: f32,
@@ -90,7 +90,6 @@ impl Default for EditorSettings {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct KeymapEntry {
     /// 例: "ctrl-shift-k"
     pub key: String,
@@ -128,15 +127,22 @@ pub struct Loaded {
     pub settings: Settings,
     /// 読めなかった層と理由（その層は無視される）。
     pub errors: Vec<String>,
+    /// 知らない項目（無視して、ほかの項目は反映する。古い版の項目や書き間違い）。
+    pub warnings: Vec<String>,
 }
 
 /// 層を重ねて設定を作る。存在しないファイルは空の層として扱う。バックグラウンドで呼ぶこと。
 pub fn load(user: Option<&Path>, workspace: Option<&Path>) -> Loaded {
     let mut errors = Vec::new();
-    let mut merged = serde_json::to_value(Settings::default()).expect("defaults serialize");
+    let mut warnings = Vec::new();
+    let defaults = serde_json::to_value(Settings::default()).expect("defaults serialize");
+    let mut merged = defaults.clone();
     for path in [user, workspace].into_iter().flatten() {
         match read_layer(path) {
-            Ok(Some(layer)) => {
+            Ok(Some(mut layer)) => {
+                for key in tidy(&mut layer, &defaults) {
+                    warnings.push(format!("{}: unknown setting `{key}` (ignored)", path.display()));
+                }
                 let mut candidate = merged.clone();
                 merge(&mut candidate, layer);
                 // 層ごとに検証し、壊れた層だけを捨てる。
@@ -150,7 +156,49 @@ pub fn load(user: Option<&Path>, workspace: Option<&Path>) -> Loaded {
         }
     }
     let settings = serde_json::from_value(merged).unwrap_or_default();
-    Loaded { settings, errors }
+    Loaded {
+        settings,
+        errors,
+        warnings,
+    }
+}
+
+/// 知らない項目を取り除き、その名前を返す。
+/// 古い版の書き方（`editor` の外の `font_size` など）は、`editor` の中へ移す（`editor` 側にあればそちらを優先）。
+fn tidy(layer: &mut Value, defaults: &Value) -> Vec<String> {
+    let (Value::Object(l), Value::Object(d)) = (layer, defaults) else {
+        return Vec::new();
+    };
+    let editor_keys: Vec<String> = d
+        .get("editor")
+        .and_then(Value::as_object)
+        .map(|e| e.keys().cloned().collect())
+        .unwrap_or_default();
+    let mut unknown = Vec::new();
+    for key in l.keys().cloned().collect::<Vec<_>>() {
+        if d.contains_key(&key) {
+            continue;
+        }
+        let value = l.remove(&key).expect("key exists");
+        if editor_keys.contains(&key) {
+            let editor = l.entry("editor").or_insert_with(|| Value::Object(Default::default()));
+            if let Value::Object(e) = editor {
+                e.entry(key).or_insert(value);
+            }
+        } else {
+            unknown.push(key);
+        }
+    }
+    if let (Some(Value::Object(le)), Some(Value::Object(de))) = (l.get_mut("editor"), d.get("editor")) {
+        le.retain(|k, _| {
+            let known = de.contains_key(k);
+            if !known {
+                unknown.push(format!("editor.{k}"));
+            }
+            known
+        });
+    }
+    unknown
 }
 
 fn read_layer(path: &Path) -> anyhow::Result<Option<Value>> {
@@ -231,10 +279,29 @@ mod tests {
         assert_eq!(l.settings.editor.font_size, 16.0);
         assert_eq!(l.settings.editor.tab_size, 4);
 
-        fs::write(&ws, r#"{ "edtor": {} }"#).unwrap();
-        assert!(load(None, Some(&ws)).errors[0].contains("edtor"), "typos are reported");
+        fs::write(&ws, r#"{ "edtor": {}, "theme": "X" }"#).unwrap();
+        let l = load(None, Some(&ws));
+        assert!(l.errors.is_empty(), "unknown keys do not reject the layer");
+        assert!(l.warnings[0].contains("edtor"), "typos are reported");
+        assert_eq!(l.settings.theme, "X");
         fs::write(&ws, "{ not json").unwrap();
         assert_eq!(load(None, Some(&ws)).errors.len(), 1);
+    }
+
+    #[test]
+    fn old_top_level_editor_keys_move_into_editor() {
+        let d = tempfile::tempdir().unwrap();
+        let user = d.path().join("user.json");
+        fs::write(&user, r#"{ "font_size": 18, "theme": "Nucleus One Light" }"#).unwrap();
+        let l = load(Some(&user), None);
+        assert!(
+            l.errors.is_empty() && l.warnings.is_empty(),
+            "{:?} {:?}",
+            l.errors,
+            l.warnings
+        );
+        assert_eq!(l.settings.editor.font_size, 18.0);
+        assert_eq!(l.settings.theme, "Nucleus One Light");
     }
 
     #[test]
