@@ -88,6 +88,8 @@ pub enum ViewLocation {
     Left,
     Right,
     Bottom,
+    /// それぞれのエディタの右側（MiniMap など）。
+    Editor,
 }
 
 impl ViewLocation {
@@ -96,6 +98,7 @@ impl ViewLocation {
             ViewLocation::Left => "panel.left",
             ViewLocation::Right => "panel.right",
             ViewLocation::Bottom => "panel.bottom",
+            ViewLocation::Editor => "editor.side",
         }
     }
 }
@@ -164,6 +167,7 @@ const KNOWN: &[(&str, &str, bool)] = &[
     ("ui", "panel.left", false),
     ("ui", "panel.right", false),
     ("ui", "panel.bottom", false),
+    ("ui", "editor.side", false),
     ("ui", "tab", false),
     ("ui", "overlay", false),
     ("ui", "statusbar", false),

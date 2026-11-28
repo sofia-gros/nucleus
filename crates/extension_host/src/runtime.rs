@@ -60,7 +60,23 @@ pub enum UiRequest {
         reply: oneshot::Sender<Result<(), String>>,
     },
     /// ワークスペース内のファイルを開く（絶対パス）。
-    OpenFile { path: PathBuf, line: Option<u32> },
+    OpenFile {
+        path: PathBuf,
+        line: Option<u32>,
+    },
+    /// エディタの表示の状態。
+    EditorView {
+        editor: u32,
+        reply: oneshot::Sender<Option<EditorViewInfo>>,
+    },
+    EditorText {
+        editor: u32,
+        reply: oneshot::Sender<Option<String>>,
+    },
+    ScrollEditor {
+        editor: u32,
+        line: u32,
+    },
     /// 差分を開く（すでに開いていれば元を新しくする）。
     ShowDiff {
         extension: String,
@@ -70,7 +86,9 @@ pub enum UiRequest {
         base_label: String,
     },
     /// Extension の状態が変わった。そのビューを描き直す。
-    Invalidate { extension: String },
+    Invalidate {
+        extension: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -78,6 +96,16 @@ pub enum NoticeLevel {
     Info,
     Warning,
     Error,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct EditorViewInfo {
+    pub version: u64,
+    pub first_line: u32,
+    pub last_line: u32,
+    pub line_count: u32,
+    pub cursor_line: u32,
+    pub height: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -569,6 +597,30 @@ impl host::Host for State {
                 base_label,
             })
             .map_err(|_| "UI が終わっている".to_string())
+    }
+
+    fn editor_view(&mut self, editor: u32) -> Option<host::EditorState> {
+        self.require("editor", "read").ok()?;
+        let v = self.ask(|reply| UiRequest::EditorView { editor, reply }).ok()??;
+        Some(host::EditorState {
+            version: v.version,
+            first_line: v.first_line,
+            last_line: v.last_line,
+            line_count: v.line_count,
+            cursor_line: v.cursor_line,
+            height: v.height,
+        })
+    }
+
+    fn editor_text(&mut self, editor: u32) -> Option<String> {
+        self.require("editor", "read").ok()?;
+        self.ask(|reply| UiRequest::EditorText { editor, reply }).ok()?
+    }
+
+    fn scroll_editor(&mut self, editor: u32, line: u32) {
+        if self.require("editor", "read").is_ok() {
+            let _ = self.host.ui.unbounded_send(UiRequest::ScrollEditor { editor, line });
+        }
     }
 
     fn run_process(&mut self, command: String, args: Vec<String>) -> Result<ProcessOutput, String> {

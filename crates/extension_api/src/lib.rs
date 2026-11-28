@@ -17,6 +17,7 @@
 //! `extension.yaml` の `main` に書く。
 
 #[doc(hidden)]
+#[allow(clippy::too_many_arguments)]
 pub mod bindings {
     wit_bindgen::generate!({
         path: "wit",

@@ -165,3 +165,68 @@ fn fake_ui_any(rx: futures::channel::mpsc::UnboundedReceiver<UiRequest>) -> std:
         }
     })
 }
+
+const MINIMAP_WASM: &[u8] = include_bytes!("../../../extensions/nucleus.minimap/minimap.wasm");
+const MINIMAP_MANIFEST: &str = include_str!("../../../extensions/nucleus.minimap/extension.yaml");
+
+/// MiniMap: エディタの内容から四角形を描き、クリックでエディタを動かす。
+#[test]
+fn minimap_draws_and_scrolls() {
+    let manifest = Manifest::from_yaml(MINIMAP_MANIFEST).unwrap();
+    assert!(manifest.validate().is_empty(), "{:?}", manifest.validate());
+    let (host, rx) = HostContext::new();
+    let scrolled = Arc::new(Mutex::new(None));
+    let s2 = scrolled.clone();
+    std::thread::spawn(move || {
+        let mut rx = rx;
+        let text: String = (0..1000).map(|i| format!("fn f{i}() {{ let x = \"s\"; }}\n")).collect();
+        while let Some(req) = block_on(rx.next()) {
+            match req {
+                UiRequest::EditorView { editor: 7, reply } => {
+                    let _ = reply.send(Some(extension_host::EditorViewInfo {
+                        version: 1,
+                        first_line: 0,
+                        last_line: 29,
+                        line_count: 1000,
+                        cursor_line: 0,
+                        height: 600.0,
+                    }));
+                }
+                UiRequest::EditorView { reply, .. } => {
+                    let _ = reply.send(None);
+                }
+                UiRequest::EditorText { reply, .. } => {
+                    let _ = reply.send(Some(text.clone()));
+                }
+                UiRequest::ScrollEditor { editor, line } => *s2.lock().unwrap() = Some((editor, line)),
+                _ => {}
+            }
+        }
+    });
+    let (ext, ready) = runtime::spawn(manifest, Arc::from(MINIMAP_WASM), host);
+    block_on(ready).unwrap().expect("activate");
+
+    let nodes = block_on(ext.render("minimap@7")).unwrap().unwrap();
+    let rects = nodes
+        .iter()
+        .find_map(|n| match &n.kind {
+            extension_host::ui::Kind::Canvas(c) => Some(c.rects.len()),
+            _ => None,
+        })
+        .expect("canvas");
+    // 600px / 2px = 300 行ぶん（＋見えている範囲の1つ）。1 行に数個の四角形。
+    assert!(rects > 300 && rects < 3000, "{rects}");
+
+    use extension_host::ui::{PointerEvent, PointerKind, UiEvent};
+    let click = UiEvent::Pointer(PointerEvent {
+        kind: PointerKind::Down,
+        x: 10.0,
+        y: 300.0,
+        height: 600.0,
+    });
+    block_on(ext.ui_event("minimap@7", "map", click)).unwrap().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    let (editor, line) = scrolled.lock().unwrap().expect("scrolled");
+    assert_eq!(editor, 7);
+    assert!((100..200).contains(&line), "{line}");
+}

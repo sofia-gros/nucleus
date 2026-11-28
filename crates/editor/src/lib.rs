@@ -86,7 +86,8 @@ pub struct EditorPanel {
     find_panel: Option<Entity<FindPanel>>,
     /// テキストが変わるたびに増える番号（言語サーバーとの同期に使う。共有して読む）。
     edit_version: std::rc::Rc<std::cell::Cell<u64>>,
-    /// 読み込み後に移動する位置（定義へのジャンプで別ファイルを開いたときなど）。
+    /// エディタの右側に置くビュー（Extension の MiniMap など）。
+    side: Vec<gpui_kit::AnyView>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -139,6 +140,7 @@ impl EditorPanel {
             saving: false,
             find_panel: None,
             edit_version: Default::default(),
+            side: Vec::new(),
             _subscriptions: subs,
         }
     }
@@ -219,6 +221,12 @@ impl EditorPanel {
 
     pub fn edit_version(&self) -> std::rc::Rc<std::cell::Cell<u64>> {
         self.edit_version.clone()
+    }
+
+    /// エディタの右側にビューを足す（Extension の `location: editor`）。
+    pub fn add_side_view(&mut self, view: gpui_kit::AnyView, cx: &mut Context<Self>) {
+        self.side.push(view);
+        cx.notify();
     }
 
     pub fn state(&self) -> &Entity<EditorState> {
@@ -349,7 +357,16 @@ impl Render for EditorPanel {
                 div()
                     .flex_1()
                     .min_h_0()
-                    .child(Editor::new(&self.state).bordered(false).h_full()),
+                    .flex()
+                    .flex_row()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .child(Editor::new(&self.state).bordered(false).h_full()),
+                    )
+                    .children(self.side.iter().cloned()),
             )
             .children(self.find_panel.clone())
     }

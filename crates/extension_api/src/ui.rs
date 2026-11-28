@@ -7,8 +7,8 @@
 
 use crate::bindings::nucleus::extension::ui::IconProps;
 pub use crate::bindings::nucleus::extension::ui::{
-    ButtonProps, ButtonVariant, Direction, InputProps, Kind, ListItemProps, Node, SectionProps, Size, StackProps,
-    TextProps, Tone, UiEvent,
+    ButtonProps, ButtonVariant, CanvasProps, Direction, DrawRect, InputProps, Kind, ListItemProps, Node, PointerEvent,
+    PointerKind, SectionProps, Size, StackProps, TextProps, Tone, UiEvent,
 };
 
 /// 要素（子を持てる）。`flatten` で WIT の平らな配列にする。
@@ -285,6 +285,27 @@ pub fn list_item(key: impl Into<String>, label: impl Into<String>) -> El {
         selected: false,
         actions: Vec::new(),
     }))
+}
+
+/// 自由な描画。`width` が 0 なら親に合わせる。
+pub fn canvas(key: impl Into<String>, width: f32, rects: Vec<DrawRect>) -> El {
+    El::new(Kind::Canvas(CanvasProps {
+        key: key.into(),
+        width,
+        rects,
+    }))
+}
+
+/// 塗りつぶした四角形。`color` は Token のキー。
+pub fn rect(x: f32, y: f32, width: f32, height: f32, color: &str, alpha: f32) -> DrawRect {
+    DrawRect {
+        x,
+        y,
+        width,
+        height,
+        color: color.to_string(),
+        alpha,
+    }
 }
 
 pub fn section(key: impl Into<String>, title: impl Into<String>) -> El {

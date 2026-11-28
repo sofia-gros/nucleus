@@ -4,12 +4,14 @@
 //! 色は役割（tone）から Token に、寸法は段階値から決まった値に変える。
 //! 入力欄の中身と見出しの開閉は Nucleus 側で持ち、Extension には変化だけを知らせる。
 
-use std::collections::HashMap;
+use std::{cell::Cell, collections::HashMap, ops::Range, rc::Rc};
+
+use gpui_kit::component::input::EditorState;
 
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable,
-    InteractiveElement as _, IntoElement, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement as _,
-    Styled, Subscription, Task, Window,
+    AnyElement, App, AppContext as _, Bounds, Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable, Hsla,
+    InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement,
+    Pixels, Render, SharedString, StatefulInteractiveElement as _, Styled, Subscription, Task, Window, canvas,
     component::{
         Icon, Sizable as _, WindowExt as _,
         button::{Button, ButtonVariants as _},
@@ -20,9 +22,9 @@ use gpui_kit::{
         skeleton::Skeleton,
         v_flex,
     },
-    div,
+    div, fill, point,
     prelude::FluentBuilder as _,
-    px,
+    px, size,
 };
 use gpui_kit::{base::StyledExt as _, component::Disableable as _};
 use i18n::Translate as _;
@@ -31,7 +33,10 @@ use theme::{Token, TokenColors as _};
 use extension_host::{
     WasmHost,
     manifest::ViewContribution,
-    ui::{ButtonProps, ButtonVariant, Direction, InputProps, Kind, Node, Size, Tone, UiEvent},
+    ui::{
+        ButtonProps, ButtonVariant, CanvasProps, Direction, InputProps, Kind, Node, PointerEvent, PointerKind, Size,
+        Tone, UiEvent,
+    },
 };
 
 enum InputHandle {
@@ -55,10 +60,23 @@ pub struct ExtensionPanel {
     inputs: HashMap<String, InputSlot>,
     collapsed: HashMap<String, bool>,
     rendering: bool,
+    /// canvas の上でマウスを押している。
+    dragging: bool,
     /// 描いている間にもう一度描く必要が出た。
     again: bool,
+    /// `render` に渡す名前（エディタの横のビューなら `<view>@<editor>`）。
+    render_key: String,
+    /// エディタの横のビューのとき、そのエディタ。
+    editor: Option<EditorSlot>,
     _render_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
+}
+
+struct EditorSlot {
+    state: Entity<EditorState>,
+    version: Rc<Cell<u64>>,
+    /// 前回描いたときの（内容の版, 見えている行, 高さ）。
+    last: (u64, Option<Range<usize>>, i32),
 }
 
 impl ExtensionPanel {
@@ -72,10 +90,14 @@ impl ExtensionPanel {
             inputs: HashMap::new(),
             collapsed: HashMap::new(),
             rendering: false,
+            dragging: false,
             again: false,
+            render_key: String::new(),
+            editor: None,
             _render_task: None,
             _subscriptions: Vec::new(),
         };
+        this.render_key = this.view.id.clone();
         // Extension の起動が終わったら最初の描画をする。
         this._subscriptions.push(cx.observe_global::<WasmHost>(|this, cx| {
             if this.nodes.is_none() && !this.rendering {
@@ -84,6 +106,43 @@ impl ExtensionPanel {
         }));
         this.refresh(cx);
         this
+    }
+
+    /// エディタの横に置くビュー（`location: editor`）。エディタの内容や見えている範囲が変わったら描き直す。
+    pub fn for_editor(
+        extension: String,
+        view: ViewContribution,
+        editor_id: u32,
+        state: Entity<EditorState>,
+        version: Rc<Cell<u64>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut this = Self::new(extension, view, window, cx);
+        this.render_key = format!("{}@{editor_id}", this.view.id);
+        this._subscriptions
+            .push(cx.observe(&state, |this, _, cx| this.editor_changed(cx)));
+        this.editor = Some(EditorSlot {
+            state,
+            version,
+            last: (u64::MAX, None, 0),
+        });
+        this.nodes = None;
+        this.refresh(cx);
+        this
+    }
+
+    fn editor_changed(&mut self, cx: &mut Context<Self>) {
+        let Some(slot) = &mut self.editor else { return };
+        let s = slot.state.read(cx);
+        let height = s.line_height().map_or(0, |lh| {
+            (s.visible_row_range().map_or(0, |r| r.len()) as f32 * f32::from(lh)) as i32
+        });
+        let now = (slot.version.get(), s.visible_row_range(), height);
+        if now != slot.last {
+            slot.last = now;
+            self.refresh(cx);
+        }
     }
 
     /// Extension にビューの中身を描いてもらう。
@@ -100,7 +159,7 @@ impl ExtensionPanel {
             return;
         };
         self.rendering = true;
-        let rx = ext.render(&self.view.id);
+        let rx = ext.render(&self.render_key);
         self._render_task = Some(cx.spawn(async move |this, cx| {
             let result = rx.await.unwrap_or_else(|_| Err("Extension が止まった".into()));
             this.update(cx, |this, cx| {
@@ -128,7 +187,7 @@ impl ExtensionPanel {
         let Some(ext) = WasmHost::get(&self.extension, cx) else {
             return;
         };
-        let rx = ext.ui_event(&self.view.id, &key, event);
+        let rx = ext.ui_event(&self.render_key, &key, event);
         cx.spawn_in(window, async move |_, cx| {
             if let Ok(Err(e)) = rx.await {
                 cx.update(|window, cx| window.push_notification(Notification::error(e), cx))
@@ -369,7 +428,75 @@ impl ExtensionPanel {
             }
             Kind::Divider => div().h(px(1.)).w_full().bg(cx.token(Token::Border)).into_any_element(),
             Kind::Skeleton => skeleton().into_any_element(),
+            Kind::Canvas(p) => self.canvas(p, ix, cx),
         }
+    }
+
+    /// 四角形を描く。マウスの操作は canvas の左上からの位置で Extension に送る。
+    fn canvas(&self, p: &CanvasProps, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+        let rects: Vec<(Bounds<Pixels>, Hsla)> = p
+            .rects
+            .iter()
+            .map(|r| {
+                let color = Token::from_key(&r.color).map_or(cx.token(Token::MutedForeground), |t| cx.token(t));
+                (
+                    Bounds::new(point(px(r.x), px(r.y)), size(px(r.width), px(r.height))),
+                    color.opacity(r.alpha.clamp(0., 1.)),
+                )
+            })
+            .collect();
+        let area: Rc<Cell<Bounds<Pixels>>> = Rc::default();
+        let paint_area = area.clone();
+        let key = p.key.clone();
+        let pointer = move |kind: PointerKind, pos: gpui_kit::Point<Pixels>, area: &Rc<Cell<Bounds<Pixels>>>| {
+            let b = area.get();
+            UiEvent::Pointer(PointerEvent {
+                kind,
+                x: f32::from(pos.x - b.origin.x),
+                y: f32::from(pos.y - b.origin.y),
+                height: f32::from(b.size.height),
+            })
+        };
+        let (k1, k2, k3) = (key.clone(), key.clone(), key);
+        let (a1, a2, a3) = (area.clone(), area.clone(), area);
+        div()
+            .id(node_id(ix))
+            .h_full()
+            .flex_shrink_0()
+            .map(|d| if p.width > 0. { d.w(px(p.width)) } else { d.w_full() })
+            .cursor_pointer()
+            .child(
+                canvas(
+                    move |bounds, _, _| paint_area.set(bounds),
+                    move |bounds, _, window, _| {
+                        for (r, color) in &rects {
+                            let b = Bounds::new(bounds.origin + r.origin, r.size);
+                            window.paint_quad(fill(b, *color));
+                        }
+                    },
+                )
+                .size_full(),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                    this.dragging = true;
+                    this.send(k1.clone(), pointer(PointerKind::Down, e.position, &a1), window, cx)
+                }),
+            )
+            .on_mouse_move(cx.listener(move |this, e: &MouseMoveEvent, window, cx| {
+                if this.dragging && e.pressed_button == Some(MouseButton::Left) {
+                    this.send(k2.clone(), pointer(PointerKind::Drag, e.position, &a2), window, cx)
+                }
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(move |this, e: &MouseUpEvent, window, cx| {
+                    this.dragging = false;
+                    this.send(k3.clone(), pointer(PointerKind::Up, e.position, &a3), window, cx)
+                }),
+            )
+            .into_any_element()
     }
 
     fn button(&self, p: &ButtonProps, ix: usize, compact: bool, cx: &mut Context<Self>) -> Button {
@@ -479,6 +606,15 @@ impl Panel for ExtensionPanel {
 
 impl Render for ExtensionPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.editor.is_some() {
+            // エディタの横: 幅は中身が決める。描けるまで（または失敗したら）何も出さない。
+            let body = self.nodes.take().map(|nodes| {
+                let el = self.render_node(0, &nodes, window, cx);
+                self.nodes = Some(nodes);
+                el
+            });
+            return div().h_full().flex().flex_row().children(body).into_any_element();
+        }
         // 前回の中身があれば、エラーのときもそれを出し続ける。
         let body = if let Some(nodes) = self.nodes.take() {
             let el = self.render_node(0, &nodes, window, cx);
@@ -501,5 +637,6 @@ impl Render for ExtensionPanel {
             .bg(cx.token(Token::SidebarBackground))
             .track_focus(&self.focus)
             .child(body)
+            .into_any_element()
     }
 }

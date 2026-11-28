@@ -154,6 +154,9 @@ pub struct Workspace {
     extension_errors_shown: bool,
     /// 登録済みの Extension のショートカット（Extension ID, コマンド ID）。
     extension_keys: HashSet<(String, String)>,
+    /// エディタの横のビューをつないだエディタ（番号 → エディタ）。
+    editor_slots: HashMap<u32, WeakEntity<EditorPanel>>,
+    next_editor_slot: u32,
     /// 開いている Diff のタブ。
     diff_views: diff_views::DiffViews,
     /// ドックに置いた Extension のビュー。
@@ -287,6 +290,8 @@ impl Workspace {
             extension_keys: HashSet::new(),
             extension_panels: Vec::new(),
             diff_views: Vec::new(),
+            editor_slots: HashMap::new(),
+            next_editor_slot: 1,
             outline_panel: outline_handle,
             terminals: first_terminal.into_iter().collect(),
             open_order: Vec::new(),
@@ -444,6 +449,7 @@ impl Workspace {
         if let Some(pos) = self.pending_positions.remove(panel.read(cx).path()) {
             panel.update(cx, |e, cx| e.go_to(pos, window, cx));
         }
+        self.attach_editor_views(&panel, window, cx);
         self.lsp_attach(panel, window, cx);
         self.save_session(cx);
         cx.notify();
@@ -499,6 +505,11 @@ impl Workspace {
             self.extension_errors_shown = true;
             extension_bridge::bind_keys(&mut self.extension_keys, cx);
             self.add_extension_views(window, cx);
+            // Extension の読み込みより先に開いていたエディタにも、横のビューを付ける。
+            let open: Vec<_> = self.editors.values().filter_map(WeakEntity::upgrade).collect();
+            for e in &open {
+                self.attach_editor_views(e, window, cx);
+            }
             // Extension の読み込みより先に開いていたファイルも、言語サーバーにつなぐ。
             let open: Vec<_> = self.editors.values().filter_map(WeakEntity::upgrade).collect();
             for e in open {

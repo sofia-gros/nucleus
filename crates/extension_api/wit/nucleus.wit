@@ -55,6 +55,27 @@ interface host {
     /// すでに開いていれば `base` を新しくする。「変更をステージ」を押すと、
     /// `handle-ui-event("diff", "stage-hunk", submit(<パッチ>))` が呼ばれる（パッチは `git apply --cached` の形）。
     show-diff: func(path: string, base: string, base-label: string) -> result<_, string>;
+
+    /// エディタの表示の状態（`editor: [read]`）。`editor` はエディタの横のビュー（`location: editor`）の
+    /// `render` に渡される `<view>@<editor>` の番号。
+    record editor-state {
+        /// 内容が変わるたびに増える。
+        version: u64,
+        /// 見えている最初と最後の行（0 始まり）。
+        first-line: u32,
+        last-line: u32,
+        line-count: u32,
+        cursor-line: u32,
+        /// エディタの高さ（px）。
+        height: f32,
+    }
+    editor-view: func(editor: u32) -> option<editor-state>;
+
+    /// エディタの内容（`editor: [read]`）。
+    editor-text: func(editor: u32) -> option<string>;
+
+    /// エディタを、`line`（0 始まり）が上に来るように動かす（`editor: [read]`）。カーソルは動かさない。
+    scroll-editor: func(editor: u32, line: u32);
 }
 
 /// 宣言的な UI（ui@1）。Extension は要素の木を返すだけで、描画は Nucleus が gpui-kit の部品で行う。
@@ -128,6 +149,24 @@ interface ui {
         actions: list<button-props>,
     }
 
+    /// 塗りつぶした四角形。`color` は Token のキー（例: `highlight.syntax.keyword`）。
+    record draw-rect {
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        color: string,
+        /// 不透明度（0〜1）。
+        alpha: f32,
+    }
+
+    record canvas-props {
+        key: string,
+        /// 幅（px）。0 なら親に合わせる。高さは親に合わせる。
+        width: f32,
+        rects: list<draw-rect>,
+    }
+
     record section-props {
         key: string,
         title: string,
@@ -150,6 +189,8 @@ interface ui {
         divider,
         /// 読み込み中の表示。
         skeleton,
+        /// 自由な描画（四角形の一覧）。マウスの操作は `pointer` で届く。
+        canvas(canvas-props),
     }
 
     /// 木は平らな配列で表す。0 番が根、`children` は配列の添字。
@@ -166,6 +207,18 @@ interface ui {
         change(string),
         /// 見出しの開閉。
         toggle(bool),
+        /// canvas の上でのマウス操作（canvas の左上からの px）。
+        pointer(pointer-event),
+    }
+
+    enum pointer-kind { down, drag, up }
+
+    record pointer-event {
+        kind: pointer-kind,
+        x: f32,
+        y: f32,
+        /// canvas の高さ（px）。
+        height: f32,
     }
 }
 

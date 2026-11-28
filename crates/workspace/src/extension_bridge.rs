@@ -19,6 +19,8 @@ use gpui_kit::{
     component::dock::{DockLayout, DockPlacement, panel_handle},
 };
 
+use gpui_kit::component::input::RopeExt as _;
+
 use crate::{CONTEXT, Workspace, extension_view::ExtensionPanel};
 
 /// Extension のコマンドを実行する（`contributes.commands`）。
@@ -137,6 +139,38 @@ impl Workspace {
                 let pos = line.map(|l| lsp_types::Position::new(l.saturating_sub(1), 0));
                 self.open_file_at(path, pos, window, cx);
             }
+            UiRequest::EditorView { editor, reply } => {
+                let info = self.slot_editor(editor).map(|e| {
+                    let e = e.read(cx);
+                    let s = e.state().read(cx);
+                    let rows = s.visible_row_range().unwrap_or(0..0);
+                    let lh = s.line_height().map_or(20., f32::from);
+                    extension_host::EditorViewInfo {
+                        version: e.edit_version().get(),
+                        first_line: rows.start as u32,
+                        last_line: rows.end.saturating_sub(1) as u32,
+                        line_count: s.text().lines_len() as u32,
+                        cursor_line: s.cursor_position().line,
+                        height: rows.len() as f32 * lh,
+                    }
+                });
+                let _ = reply.send(info);
+            }
+            UiRequest::EditorText { editor, reply } => {
+                let text = self
+                    .slot_editor(editor)
+                    .map(|e| e.read(cx).state().read(cx).value().to_string());
+                let _ = reply.send(text);
+            }
+            UiRequest::ScrollEditor { editor, line } => {
+                if let Some(e) = self.slot_editor(editor) {
+                    let state = e.read(cx).state().clone();
+                    state.update(cx, |s, cx| {
+                        let lh = s.line_height().map_or(20., f32::from) as f64;
+                        s.set_scroll_y_f64(-(line as f64 * lh), cx);
+                    });
+                }
+            }
             UiRequest::ShowDiff {
                 extension,
                 path,
@@ -177,6 +211,7 @@ impl Workspace {
                 ViewLocation::Left => DockPlacement::Left,
                 ViewLocation::Right => DockPlacement::Right,
                 ViewLocation::Bottom => DockPlacement::Bottom,
+                ViewLocation::Editor => continue,
             };
             let panel = cx.new(|cx| ExtensionPanel::new(v.extension.clone(), v.view.clone(), window, cx));
             self.extension_panels.push(panel.downgrade());
@@ -205,6 +240,52 @@ impl Workspace {
                 area.toggle_dock(DockPlacement::Right, window, cx);
             }
         });
+    }
+
+    /// エディタの横のビュー（`location: editor`）を付ける。Extension の読み込み前なら何もしない
+    /// （読み込み後に開いているエディタへまとめて付ける）。
+    pub(crate) fn attach_editor_views(
+        &mut self,
+        editor: &gpui_kit::Entity<editor::EditorPanel>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(store) = extension_host::ExtensionStore::get(cx) else {
+            return;
+        };
+        if store.stage != extension_host::Stage::Ready {
+            return;
+        }
+        if self.editor_slots.values().any(|w| w.entity_id() == editor.entity_id()) {
+            return;
+        }
+        let views: Vec<_> = store
+            .views()
+            .into_iter()
+            .filter(|v| v.view.location == ViewLocation::Editor)
+            .collect();
+        if views.is_empty() {
+            return;
+        }
+        let id = self.next_editor_slot;
+        self.next_editor_slot += 1;
+        self.editor_slots.insert(id, editor.downgrade());
+        let (state, version) = {
+            let e = editor.read(cx);
+            (e.state().clone(), e.edit_version())
+        };
+        for v in views {
+            let (state, version) = (state.clone(), version.clone());
+            let slot = cx.new(|cx| {
+                ExtensionPanel::for_editor(v.extension.clone(), v.view.clone(), id, state, version, window, cx)
+            });
+            self.extension_panels.push(slot.downgrade());
+            editor.update(cx, |e, cx| e.add_side_view(slot.into(), cx));
+        }
+    }
+
+    fn slot_editor(&self, id: u32) -> Option<gpui_kit::Entity<editor::EditorPanel>> {
+        self.editor_slots.get(&id).and_then(WeakEntity::upgrade)
     }
 
     /// 保存したファイルを Extension に知らせる（ワークスペースからの相対パス）。
