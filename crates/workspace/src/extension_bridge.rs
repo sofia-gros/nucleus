@@ -330,6 +330,29 @@ impl Workspace {
         WasmHost::broadcast(WorkspaceEvent::FileSaved(rel.display().to_string()), cx);
     }
 
+    /// 設定画面を開く（開いていればそのタブを選ぶ）。
+    pub(crate) fn open_settings_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(page) = self.settings_page.as_ref().and_then(WeakEntity::upgrade) {
+            let id = gpui_kit::component::dock::PanelId::from(page.entity_id());
+            if self.dock_area.read(cx).panel(id).is_some() {
+                self.dock_area.update(cx, |a, cx| a.select_panel(id, window, cx));
+                return;
+            }
+        }
+        let page = cx.new(|cx| crate::settings_page::SettingsPage::new(window, cx));
+        self._subscriptions
+            .push(cx.subscribe_in(&page, window, |this, _, e, window, cx| match e {
+                crate::settings_page::SettingsPageEvent::Set(key, value) => {
+                    this.choose_setting(key.clone(), value.clone(), window, cx)
+                }
+                crate::settings_page::SettingsPageEvent::OpenJson => this.open_user_settings(window, cx),
+            }));
+        self.settings_page = Some(page.downgrade());
+        self.dock_area.update(cx, |a, cx| {
+            a.add_panel_view(panel_handle(page), DockPlacement::Center, None, window, cx)
+        });
+    }
+
     /// Extension の管理画面を開く（開いていればそのタブを選ぶ）。
     pub(crate) fn open_extensions(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(page) = self.extensions_page.as_ref().and_then(WeakEntity::upgrade) {

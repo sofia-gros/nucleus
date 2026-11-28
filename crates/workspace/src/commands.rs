@@ -58,6 +58,9 @@ pub fn all(cx: &App) -> Vec<CommandDef> {
         c("core.command.open-settings", IconName::Settings2, || {
             Box::new(OpenSettings)
         }),
+        c("core.command.open-settings-json", IconName::FileCode, || {
+            Box::new(crate::OpenSettingsJson)
+        }),
         c("core.command.open-workspace-settings", IconName::Settings2, || {
             Box::new(OpenWorkspaceSettings)
         }),

@@ -19,6 +19,7 @@ mod prompt;
 mod recent;
 mod search_panel;
 mod session;
+mod settings_page;
 mod settings_sync;
 
 use std::{
@@ -74,6 +75,7 @@ actions!(
         ToggleTerminal,
         ProjectSearch,
         OpenExtensions,
+        OpenSettingsJson,
     ]
 );
 
@@ -168,6 +170,8 @@ pub struct Workspace {
     /// エディタの横のビューをつないだエディタ（番号 → エディタ）。
     editor_slots: HashMap<u32, WeakEntity<EditorPanel>>,
     next_editor_slot: u32,
+    /// 設定画面（開いていれば）。
+    settings_page: Option<WeakEntity<settings_page::SettingsPage>>,
     /// Extension の管理画面（開いていれば）。
     extensions_page: Option<WeakEntity<extensions_page::ExtensionsPage>>,
     /// 開いている Diff のタブ。
@@ -305,6 +309,7 @@ impl Workspace {
             extension_panels: Vec::new(),
             diff_views: Vec::new(),
             extensions_page: None,
+            settings_page: None,
             ext_views_added: HashSet::new(),
             right_ext_panels: Vec::new(),
             editor_slots: HashMap::new(),
@@ -827,7 +832,8 @@ impl Render for Workspace {
                 this.toggle_palette(PaletteKind::Languages, window, cx)
             }))
             .on_action(cx.listener(|this, _: &Quit, window, cx| this.quit(window, cx)))
-            .on_action(cx.listener(|this, _: &OpenSettings, window, cx| this.open_user_settings(window, cx)))
+            .on_action(cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings_page(window, cx)))
+            .on_action(cx.listener(|this, _: &OpenSettingsJson, window, cx| this.open_user_settings(window, cx)))
             .on_action(cx.listener(|this, _: &NewTerminal, window, cx| this.new_terminal(window, cx)))
             .on_action(cx.listener(|this, _: &ToggleTerminal, window, cx| this.toggle_terminal(window, cx)))
             .on_action(cx.listener(|this, _: &ProjectSearch, window, cx| this.open_project_search(window, cx)))

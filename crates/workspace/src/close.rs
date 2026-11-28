@@ -161,15 +161,21 @@ impl Workspace {
     /// 設定を書き込み、監視を張り直して反映する（設定ファイルが新しく作られる場合に備える）。
     pub(crate) fn choose_setting(
         &mut self,
-        key: &'static str,
+        key: impl Into<String>,
         value: serde_json::Value,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        /// 書き込みは読んで書き換えるので、続けて変えたときに前の変更を失わないよう1つずつ行う。
+        static WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let Some(path) = settings::user_settings_path() else {
             return;
         };
-        let write = cx.background_spawn(async move { settings::set_value(&path, key, &value) });
+        let key: String = key.into();
+        let write = cx.background_spawn(async move {
+            let _guard = WRITE.lock().unwrap_or_else(|e| e.into_inner());
+            settings::set_value(&path, &key, &value)
+        });
         cx.spawn_in(window, async move |this, cx| match write.await {
             Ok(()) => {
                 this.update_in(cx, |this, window, cx| this.watch_settings(window, cx))

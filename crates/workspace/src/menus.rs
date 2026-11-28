@@ -116,6 +116,10 @@ impl Workspace {
                 .separator()
                 .menu(t("core.command.open-settings", cx), Box::new(OpenSettings))
                 .menu(
+                    t("core.command.open-settings-json", cx),
+                    Box::new(crate::OpenSettingsJson),
+                )
+                .menu(
                     t("core.command.open-workspace-settings", cx),
                     Box::new(OpenWorkspaceSettings),
                 )

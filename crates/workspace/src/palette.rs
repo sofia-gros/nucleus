@@ -28,7 +28,7 @@ thread_local! {
 }
 
 /// テーマ・表示言語の選択肢: (設定に書く値, 表示名, 使用中か)。
-fn choices(kind: PaletteKind, cx: &gpui_kit::App) -> Vec<(String, String, bool)> {
+pub(crate) fn choices(kind: PaletteKind, cx: &gpui_kit::App) -> Vec<(String, String, bool)> {
     match kind {
         PaletteKind::Themes => {
             let current = settings::ActiveSettings::get(cx).theme.clone();
