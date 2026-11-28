@@ -5,7 +5,8 @@ pub mod diff_view;
 pub mod file;
 mod find_panel;
 
-use find_panel::{FindNext, FindPanel, FindPanelEvent, FindPrevious};
+pub use find_panel::{FindNext, FindPrevious};
+use find_panel::{FindPanel, FindPanelEvent};
 
 use std::path::{Path, PathBuf};
 

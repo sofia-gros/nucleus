@@ -230,3 +230,34 @@ core-status-extension-updates = { $count ->
     }
 core-extensions-updated-notify = { $name } was updated to { $version }.
 core-extensions-number-invalid = Enter a number ({ $range })
+
+# Menus
+core-menu-item-new-file = New File
+core-menu-item-open-recent = Open Recent
+core-menu-item-undo = Undo
+core-menu-item-redo = Redo
+core-menu-item-cut = Cut
+core-menu-item-copy = Copy
+core-menu-item-paste = Paste
+core-menu-item-indent = Indent
+core-menu-item-outdent = Outdent
+core-menu-item-select-all = Select All
+core-menu-item-select-to-line-start = Select to Start of Line
+core-menu-item-select-to-line-end = Select to End of Line
+core-menu-item-find = Find
+core-menu-item-replace = Replace
+core-menu-item-find-next = Find Next
+core-menu-item-find-previous = Find Previous
+core-menu-item-find-replace = Find / Replace in File
+core-menu-item-find-next-previous = Find Next / Previous
+core-menu-item-go-to-definition = Go to Definition
+core-menu-item-toggle-docks = Toggle Left / Bottom / Right Dock
+core-menu-item-documentation = Documentation
+core-menu-item-keyboard-shortcuts = Keyboard Shortcuts
+core-menu-item-report-issue = Report an Issue
+core-menu-item-about = About Nucleus
+core-clone-choose-folder = Choose Folder…
+core-clone-hint = The repository is cloned into a new folder inside the folder you choose next.
+core-clone-started = Cloning { $url }…
+core-clone-failed = Could not clone: { $error }
+core-recent-missing = { $path } no longer exists.

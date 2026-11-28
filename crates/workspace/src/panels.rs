@@ -194,8 +194,14 @@ fn action_row(
                 .child(cx.t(label_key)),
         )
         .when_some(keys, |d, k| d.child(kbd(k, cx)))
-        .when(id == "w-open", |d| {
-            d.on_click(|_, window, cx| window.dispatch_action(Box::new(crate::OpenFolder), cx))
+        .on_click(move |_, window, cx| {
+            let action: Box<dyn gpui_kit::Action> = match id {
+                "w-open" => Box::new(crate::OpenFolder),
+                "w-new" => Box::new(crate::menus::NewFile),
+                "w-clone" => Box::new(crate::menus::CloneRepository),
+                _ => Box::new(crate::CommandPalette),
+            };
+            window.dispatch_action(action, cx)
         })
 }
 
@@ -233,14 +239,49 @@ fn welcome(cx: &App) -> impl IntoElement {
             false,
             cx,
         ));
-    let recent = card("core.welcome.recent", cx).child(
-        div()
-            .py_2()
-            .px_2()
-            .text_sm()
-            .text_color(cx.token(Token::MutedForeground))
-            .child(cx.t("core.welcome.no-recent")),
-    );
+    let rows = crate::menus::recent_rows(cx);
+    let recent = card("core.welcome.recent", cx).map(|c| {
+        if rows.is_empty() {
+            return c.child(
+                div()
+                    .py_2()
+                    .px_2()
+                    .text_sm()
+                    .text_color(cx.token(Token::MutedForeground))
+                    .child(cx.t("core.welcome.no-recent")),
+            );
+        }
+        c.children(rows.into_iter().enumerate().map(|(i, (path, name, shown))| {
+            h_flex()
+                .id(("recent", i))
+                .h(px(32.))
+                .px_2()
+                .gap_2()
+                .rounded_md()
+                .cursor_pointer()
+                .hover(|d| d.bg(cx.token(Token::AccentBackground)))
+                .child(
+                    Icon::new(IconName::Folder)
+                        .small()
+                        .text_color(cx.token(Token::ListHighlightForeground)),
+                )
+                .child(div().text_sm().text_color(cx.token(Token::Foreground)).child(name))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .text_xs()
+                        .text_color(cx.token(Token::MutedForeground))
+                        .child(shown),
+                )
+                .on_click(move |_, window, cx| {
+                    window.dispatch_action(Box::new(crate::menus::OpenRecent { path: path.clone() }), cx)
+                })
+        }))
+    });
     let tip = |keys: &str, key: &str| {
         h_flex().gap_2().child(kbd(keys, cx)).child(
             div()

@@ -9,12 +9,14 @@ mod extension_view;
 mod extensions_page;
 mod finder;
 mod language_support;
+mod menus;
 mod palette;
 mod panels;
 mod problems;
 mod project_panel;
 mod project_search;
 mod prompt;
+mod recent;
 mod search_panel;
 mod session;
 mod settings_sync;
@@ -40,9 +42,7 @@ use gpui_kit::{
         status_bar::StatusBar,
         v_flex,
     },
-    div,
-    prelude::FluentBuilder as _,
-    px, size,
+    div, px, size,
 };
 use i18n::Translate as _;
 use theme::{Token, TokenColors as _};
@@ -91,6 +91,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-shift-p", CommandPalette, Some(CONTEXT)),
         KeyBinding::new("f1", CommandPalette, Some(CONTEXT)),
         KeyBinding::new("ctrl-p", FindFile, Some(CONTEXT)),
+        KeyBinding::new("ctrl-n", menus::NewFile, Some(CONTEXT)),
         KeyBinding::new("ctrl-shift-f", ProjectSearch, Some(CONTEXT)),
         KeyBinding::new("ctrl-shift-x", OpenExtensions, Some(CONTEXT)),
         KeyBinding::new("ctrl-w", CloseActiveEditor, Some(CONTEXT)),
@@ -103,6 +104,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-q", Quit, None),
     ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
+    recent::init(cx);
 }
 
 /// メインウィンドウを開く。`paths` はフォルダかファイル（起動時の引数）。
@@ -331,6 +333,7 @@ impl Workspace {
                 t.update(cx, |t, _| t.set_cwd(Some(path.clone())));
             }
             self.file_index = None;
+            recent::add(&path, cx);
             self.sync_extension_root(cx);
             let root = self.project.read(cx).root();
             self.search.update(cx, |s, cx| s.set_root(root, cx));
@@ -601,8 +604,7 @@ impl Workspace {
             .update(cx, |area, cx| area.toggle_dock(placement, window, cx));
     }
 
-    fn render_title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let menus = ["file", "edit", "view", "selection", "find", "extensions", "help"];
+    fn render_title_bar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let dock_button =
             |id: &'static str, icon: IconName, key: &str, placement: DockPlacement, cx: &mut Context<Self>| {
                 Button::new(id)
@@ -636,15 +638,7 @@ impl Workspace {
                                 .text_color(cx.token(Token::PrimaryBackground)),
                         ),
                     )
-                    .children(menus.map(|m| {
-                        Button::new(m)
-                            .ghost()
-                            .small()
-                            .label(cx.t(&format!("core.menu.{m}")))
-                            .when(m == "extensions", |b| {
-                                b.on_click(cx.listener(|this, _, window, cx| this.open_extensions(window, cx)))
-                            })
-                    })),
+                    .child(self.render_menus(window, cx)),
             )
             .child(
                 div()
@@ -795,7 +789,7 @@ fn language_label(name: &str) -> String {
 }
 
 impl Render for Workspace {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_extension_root(cx);
         v_flex()
             .key_context(CONTEXT)
@@ -838,6 +832,15 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &ToggleTerminal, window, cx| this.toggle_terminal(window, cx)))
             .on_action(cx.listener(|this, _: &ProjectSearch, window, cx| this.open_project_search(window, cx)))
             .on_action(cx.listener(|this, _: &OpenExtensions, window, cx| this.open_extensions(window, cx)))
+            .on_action(cx.listener(|this, _: &menus::NewFile, window, cx| this.new_file(window, cx)))
+            .on_action(cx.listener(|this, _: &menus::CloneRepository, window, cx| this.clone_repository(window, cx)))
+            .on_action(cx.listener(|this, a: &menus::OpenRecent, window, cx| this.open_recent(a, window, cx)))
+            .on_action(cx.listener(|this, _: &menus::About, window, cx| this.show_about(window, cx)))
+            .on_action(
+                cx.listener(|this, _: &menus::ShowKeyboardShortcuts, window, cx| this.show_shortcuts(window, cx)),
+            )
+            .on_action(cx.listener(|this, _: &menus::OpenDocumentation, _, cx| this.open_documentation(cx)))
+            .on_action(cx.listener(|this, _: &menus::ReportIssue, _, cx| this.report_issue(cx)))
             .on_action(
                 cx.listener(|this, a: &extension_bridge::RunExtensionCommand, window, cx| {
                     this.run_extension_command(a, window, cx)
@@ -851,7 +854,7 @@ impl Render for Workspace {
             .bg(cx.token(Token::Background))
             .text_color(cx.token(Token::Foreground))
             .font_family(cx.global::<theme::ActiveTheme>().resolved.fonts.ui.clone())
-            .child(self.render_title_bar(cx))
+            .child(self.render_title_bar(window, cx))
             .child(div().flex_1().min_h_0().child(self.dock_area.clone()))
             .child(self.render_status_bar(cx))
             .children(self.render_palette(cx))
