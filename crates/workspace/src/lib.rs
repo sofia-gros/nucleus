@@ -235,8 +235,9 @@ impl Workspace {
                 DockLayout::tabs()
             };
             area.set_center(center, window, cx);
+            let (primary, secondary) = side_bars(cx);
             area.set_dock(
-                DockPlacement::Left,
+                primary,
                 DockLayout::tabs().panel_view(project_handle, cx).panel_view(search, cx),
                 window,
                 cx,
@@ -250,17 +251,12 @@ impl Workspace {
                 window,
                 cx,
             );
-            area.set_dock(
-                DockPlacement::Right,
-                DockLayout::tabs().panel_view(outline, cx),
-                window,
-                cx,
-            );
-            area.set_dock_size(DockPlacement::Left, px(280.), window, cx);
+            area.set_dock(secondary, DockLayout::tabs().panel_view(outline, cx), window, cx);
+            area.set_dock_size(primary, px(280.), window, cx);
             area.set_dock_size(DockPlacement::Bottom, px(240.), window, cx);
-            area.set_dock_size(DockPlacement::Right, px(320.), window, cx);
-            // デザイン（02 Editor — main）と同じく、右ドックは閉じた状態で始める。
-            area.toggle_dock(DockPlacement::Right, window, cx);
+            area.set_dock_size(secondary, px(320.), window, cx);
+            // デザイン（02 Editor — main）と同じく、副サイドバー（ふつうは右）は閉じた状態で始める。
+            area.toggle_dock(secondary, window, cx);
             area
         });
         // DockArea の作成後に設定する（作成中に呼ぶと DockArea の二重更新になる）。
@@ -309,6 +305,17 @@ impl Workspace {
                 }
             }
         }));
+        // workbench.side_bar_location が変わったら、左右のドックを入れ替える。
+        let mut side = settings::ActiveSettings::get(cx).workbench.side_bar_location;
+        subs.push(
+            cx.observe_global_in::<settings::ActiveSettings>(window, move |this, window, cx| {
+                let now = settings::ActiveSettings::get(cx).workbench.side_bar_location;
+                if now != side {
+                    side = now;
+                    this.swap_side_bars(window, cx);
+                }
+            }),
+        );
         // 保存の前の整形（editor.format_on_save）は、このワークスペースの言語サーバーに頼む。
         let weak = cx.entity().downgrade();
         cx.set_global(editor::FormatOnSave(std::rc::Rc::new(move |path, cx| {
@@ -947,6 +954,53 @@ pub fn simplify_path(path: PathBuf) -> PathBuf {
         }
     }
     path
+}
+
+/// 主サイドバー（ファイルツリーと検索）と副サイドバー（アウトラインや Git）の場所
+/// （`workbench.side_bar_location`。VSCode と同じく、主を右にすると副は左になる）。
+pub(crate) fn side_bars(cx: &App) -> (DockPlacement, DockPlacement) {
+    match settings::ActiveSettings::get(cx).workbench.side_bar_location {
+        settings::SideBarLocation::Left => (DockPlacement::Left, DockPlacement::Right),
+        settings::SideBarLocation::Right => (DockPlacement::Right, DockPlacement::Left),
+    }
+}
+
+impl Workspace {
+    /// 左右のドックの中身を入れ替える（`workbench.side_bar_location` が変わったとき）。
+    pub(crate) fn swap_side_bars(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.dock_area.update(cx, |area, cx| {
+            let take = |area: &DockArea, p: DockPlacement| -> Vec<_> {
+                area.layout(p)
+                    .map(|t| t.panels().filter_map(|id| area.panel(id).cloned()).collect())
+                    .unwrap_or_default()
+            };
+            let (left, right) = (take(area, DockPlacement::Left), take(area, DockPlacement::Right));
+            let sizes = (
+                area.dock_size(DockPlacement::Left),
+                area.dock_size(DockPlacement::Right),
+            );
+            let open = (
+                area.is_dock_open(DockPlacement::Left),
+                area.is_dock_open(DockPlacement::Right),
+            );
+            for (placement, panels, size, was_open) in [
+                (DockPlacement::Left, right, sizes.1, open.1),
+                (DockPlacement::Right, left, sizes.0, open.0),
+            ] {
+                let mut layout = DockLayout::tabs();
+                for p in panels {
+                    layout = layout.panel_view(p, cx);
+                }
+                area.set_dock(placement, layout, window, cx);
+                if let Some(size) = size {
+                    area.set_dock_size(placement, size, window, cx);
+                }
+                if area.is_dock_open(placement) != was_open {
+                    area.toggle_dock(placement, window, cx);
+                }
+            }
+        });
+    }
 }
 
 #[cfg(test)]

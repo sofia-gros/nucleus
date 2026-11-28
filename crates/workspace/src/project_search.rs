@@ -4,11 +4,7 @@ use std::path::PathBuf;
 
 use gpui_kit::{
     Context, PromptLevel, WeakEntity, Window,
-    component::{
-        WindowExt as _,
-        dock::{DockPlacement, PanelId},
-        notification::Notification,
-    },
+    component::{WindowExt as _, dock::PanelId, notification::Notification},
 };
 use i18n::Translate as _;
 use project::search::{self, SearchOptions};
@@ -36,8 +32,9 @@ impl Workspace {
     pub(crate) fn open_project_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let id = PanelId::from(self.search.entity_id());
         self.dock_area.update(cx, |area, cx| {
-            if !area.is_dock_open(DockPlacement::Left) {
-                area.toggle_dock(DockPlacement::Left, window, cx);
+            let (primary, _) = crate::side_bars(cx);
+            if !area.is_dock_open(primary) {
+                area.toggle_dock(primary, window, cx);
             }
             area.select_panel(id, window, cx);
         });

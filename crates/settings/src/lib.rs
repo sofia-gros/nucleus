@@ -75,9 +75,18 @@ pub fn load(user: Option<&Path>, workspace: Option<&Path>) -> Loaded {
     let mut warnings = Vec::new();
     let defaults = serde_json::to_value(Settings::default()).expect("defaults serialize");
     let mut merged = defaults.clone();
+    let mut overrides: std::collections::BTreeMap<String, Value> = Default::default();
     for path in [user, workspace].into_iter().flatten() {
         match read_layer(path) {
             Ok(Some(mut layer)) => {
+                for (language, over) in take_language_overrides(&mut layer, &defaults, &mut warnings, path) {
+                    merge(
+                        overrides
+                            .entry(language)
+                            .or_insert_with(|| Value::Object(Default::default())),
+                        over,
+                    );
+                }
                 for key in tidy(&mut layer, &defaults) {
                     warnings.push(format!("{}: unknown setting `{key}` (ignored)", path.display()));
                 }
@@ -93,12 +102,84 @@ pub fn load(user: Option<&Path>, workspace: Option<&Path>) -> Loaded {
             Err(e) => errors.push(format!("{}: {e}", path.display())),
         }
     }
-    let settings = serde_json::from_value(merged).unwrap_or_default();
+    let mut settings: Settings = serde_json::from_value(merged).unwrap_or_default();
+    settings.language_overrides = overrides;
+    // 上書きの値の形が合わないもの（"tab_size": "wide" など）を知らせる。
+    for (language, over) in &settings.language_overrides {
+        for group in OVERRIDABLE {
+            let Some(o) = over.get(*group) else { continue };
+            let mut base = serde_json::to_value(&settings)
+                .ok()
+                .and_then(|v| v.get(*group).cloned())
+                .unwrap_or_default();
+            merge(&mut base, o.clone());
+            let ok = match *group {
+                "editor" => serde_json::from_value::<EditorSettings>(base).map(drop),
+                _ => serde_json::from_value::<FilesSettings>(base).map(drop),
+            };
+            if let Err(e) = ok {
+                errors.push(format!("[{language}] {group}: {e}"));
+            }
+        }
+    }
     Loaded {
         settings,
         errors,
         warnings,
     }
+}
+
+/// `"[rust]": { "editor.tab_size": 2 }` のような言語ごとの上書きを取り出す（VSCode と同じ書き方）。
+/// `"[rust][toml]"` のように複数の言語をまとめても、`"editor": { … }` と入れ子にしてもよい。
+/// 戻り値は（言語, `{ "editor": {...}, "files": {...} }`）。
+fn take_language_overrides(
+    layer: &mut Value,
+    defaults: &Value,
+    warnings: &mut Vec<String>,
+    path: &Path,
+) -> Vec<(String, Value)> {
+    let Value::Object(l) = layer else { return Vec::new() };
+    let keys: Vec<String> = l
+        .keys()
+        .filter(|k| k.starts_with('[') && k.ends_with(']'))
+        .cloned()
+        .collect();
+    let mut out = Vec::new();
+    for key in keys {
+        let Some(Value::Object(body)) = l.remove(&key) else {
+            warnings.push(format!("{}: `{key}` must be an object (ignored)", path.display()));
+            continue;
+        };
+        let mut nested = serde_json::Map::new();
+        for (k, v) in body {
+            // "editor.tab_size" と "editor": { "tab_size": … } のどちらも受け付ける。
+            let pairs: Vec<(String, String, Value)> = match k.split_once('.') {
+                Some((g, f)) => vec![(g.to_string(), f.to_string(), v)],
+                None => match v {
+                    Value::Object(m) => m.into_iter().map(|(f, v)| (k.clone(), f, v)).collect(),
+                    _ => vec![(k.clone(), String::new(), v)],
+                },
+            };
+            for (group, field, v) in pairs {
+                let known =
+                    OVERRIDABLE.contains(&group.as_str()) && defaults.get(&group).and_then(|g| g.get(&field)).is_some();
+                if !known {
+                    warnings.push(format!(
+                        "{}: `{key}`: unknown setting `{group}.{field}` (ignored)",
+                        path.display()
+                    ));
+                    continue;
+                }
+                if let Value::Object(g) = nested.entry(group).or_insert_with(|| Value::Object(Default::default())) {
+                    g.insert(field, v);
+                }
+            }
+        }
+        for language in key.trim_matches(['[', ']']).split("][") {
+            out.push((language.trim().to_lowercase(), Value::Object(nested.clone())));
+        }
+    }
+    out
 }
 
 /// 知らない項目を取り除き、その名前を返す。
@@ -243,6 +324,29 @@ mod tests {
         );
         assert_eq!(l.settings.editor.font_size, 18.0);
         assert_eq!(l.settings.theme, "Nucleus One Light");
+    }
+
+    #[test]
+    fn language_overrides_apply_only_to_that_language() {
+        let d = tempfile::tempdir().unwrap();
+        let user = d.path().join("user.json");
+        fs::write(
+            &user,
+            r#"{ "editor": { "tab_size": 4 },
+                 "[rust]": { "editor.tab_size": 2, "files": { "trim_trailing_whitespace": true } },
+                 "[python][toml]": { "editor.rulers": [79] },
+                 "[go]": { "editor.nonsense": 1 } }"#,
+        )
+        .unwrap();
+        let l = load(Some(&user), None);
+        assert!(l.errors.is_empty(), "{:?}", l.errors);
+        assert_eq!(l.warnings.len(), 1, "{:?}", l.warnings);
+        let s = l.settings;
+        assert_eq!(s.editor_for("rust").tab_size, 2);
+        assert!(s.files_for("rust").trim_trailing_whitespace);
+        assert_eq!(s.editor_for("text").tab_size, 4);
+        assert_eq!(s.editor_for("toml").rulers, vec![79]);
+        assert_eq!(s.editor_for("python").rulers, vec![79]);
     }
 
     #[test]

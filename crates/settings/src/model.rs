@@ -45,6 +45,10 @@ pub struct Settings {
     pub check_extension_updates: bool,
     /// Extension ごとの設定（拡張機能の画面で変える）。`{ "<id>": { "<key>": 値 } }`
     pub extension_settings: BTreeMap<String, serde_json::Map<String, serde_json::Value>>,
+    /// 言語ごとの上書き（VSCode と同じく `"[rust]": { "editor.tab_size": 2 }` と書く）。
+    /// 言語名 → `{ "editor": {...}, "files": {...} }`。読み込むときに lib.rs が作る。
+    #[serde(skip)]
+    pub language_overrides: BTreeMap<String, serde_json::Value>,
 }
 
 impl Default for Settings {
@@ -65,7 +69,41 @@ impl Default for Settings {
             extensions_registry: None,
             check_extension_updates: true,
             extension_settings: Default::default(),
+            language_overrides: Default::default(),
         }
+    }
+}
+
+/// 言語ごとの上書きで変えられるまとまり。
+pub const OVERRIDABLE: &[&str] = &["editor", "files"];
+
+impl Settings {
+    /// その言語で使うエディタの設定（`"[言語]"` の上書きを重ねたもの）。
+    pub fn editor_for(&self, language: &str) -> EditorSettings {
+        self.overridden("editor", language, &self.editor)
+    }
+
+    /// その言語で使うファイルの設定（`"[言語]"` の上書きを重ねたもの）。
+    pub fn files_for(&self, language: &str) -> FilesSettings {
+        self.overridden("files", language, &self.files)
+    }
+
+    fn overridden<T: Serialize + serde::de::DeserializeOwned + Clone>(
+        &self,
+        group: &str,
+        language: &str,
+        base: &T,
+    ) -> T {
+        let Some(over) = self.language_overrides.get(language).and_then(|o| o.get(group)) else {
+            return base.clone();
+        };
+        let mut v = serde_json::to_value(base).expect("settings serialize");
+        if let (Some(b), Some(o)) = (v.as_object_mut(), over.as_object()) {
+            for (k, val) in o {
+                b.insert(k.clone(), val.clone());
+            }
+        }
+        serde_json::from_value(v).unwrap_or_else(|_| base.clone())
     }
 }
 
@@ -88,6 +126,10 @@ pub struct EditorSettings {
     /// 折り返した行の頭をそろえる位置。
     pub wrapping_indent: WrappingIndent,
     pub line_numbers: bool,
+    /// 行番号を、カーソルのある行からの距離で出す（カーソルの行は本来の番号）。
+    pub relative_line_numbers: bool,
+    /// 縦の目安線を引く列（例: `[80, 120]`）。
+    pub rulers: Vec<usize>,
     pub indent_guides: bool,
     /// 空白とタブを記号で見せる。
     pub render_whitespace: RenderWhitespace,
@@ -108,6 +150,16 @@ pub struct EditorSettings {
     pub format_on_save: bool,
     /// マウスを乗せたとき、言語サーバーの説明を出す。
     pub hover: bool,
+    /// クリックでカーソルを足すときに押すキー（もう一方は定義へ移動）。
+    pub multi_cursor_modifier: MultiCursorModifier,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MultiCursorModifier {
+    Alt,
+    /// Windows / Linux は Ctrl、macOS は Cmd。
+    CtrlCmd,
 }
 
 impl Default for EditorSettings {
@@ -122,6 +174,8 @@ impl Default for EditorSettings {
             soft_wrap: false,
             wrapping_indent: WrappingIndent::Same,
             line_numbers: true,
+            relative_line_numbers: false,
+            rulers: Vec::new(),
             indent_guides: true,
             render_whitespace: RenderWhitespace::None,
             folding: true,
@@ -133,6 +187,7 @@ impl Default for EditorSettings {
             highlight_line_only_when_focused: false,
             format_on_save: false,
             hover: true,
+            multi_cursor_modifier: MultiCursorModifier::Alt,
         }
     }
 }
@@ -221,6 +276,8 @@ pub enum Eol {
 #[serde(default)]
 pub struct WorkbenchSettings {
     pub status_bar: bool,
+    /// 主サイドバー（ファイルツリーと検索）の場所。副サイドバー（アウトラインや Git）は反対側。
+    pub side_bar_location: SideBarLocation,
     /// ファイルツリーの 1 段の字下げ（px）。
     pub tree_indent: f32,
     /// ファイルツリーの字下げの線。
@@ -233,11 +290,19 @@ impl Default for WorkbenchSettings {
     fn default() -> Self {
         WorkbenchSettings {
             status_bar: true,
+            side_bar_location: SideBarLocation::Left,
             tree_indent: 16.0,
             tree_indent_guides: true,
             startup_welcome: true,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SideBarLocation {
+    Left,
+    Right,
 }
 
 // ---- ウィンドウ ----

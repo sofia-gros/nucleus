@@ -24,13 +24,13 @@ use gpui_kit::{
         dock::{BasePanel, Panel, PanelEvent},
         h_flex,
         input::{
-            Editor, EditorState, GoToDefinition, InputEvent, Position, Replace, RopeExt as _, Search, TabSize,
-            WrappingIndent,
+            Editor, EditorState, GoToDefinition, GutterStyle, InputEvent, Position, Replace, RopeExt as _, Search,
+            TabSize, WrappingIndent,
         },
     },
     div, px, relative,
 };
-use settings::{AutoSave, CursorBlinking, Eol, RenderWhitespace};
+use settings::{AutoSave, CursorBlinking, Eol, MultiCursorModifier, RenderWhitespace};
 use theme::{Token, TokenColors as _};
 
 pub use file::{LineEnding, LoadError, Loaded};
@@ -60,7 +60,7 @@ pub fn language_for(path: &Path, cx: &App) -> String {
     file::language_for(path)
 }
 
-actions!(editor, [Save]);
+actions!(editor, [Save, AddNextOccurrence, SelectAllOccurrences]);
 
 /// 保存の前の整形（`editor.format_on_save`）。言語サーバーを持つ Workspace が入れる。
 /// 返すのは置き換え（バイトの範囲と新しい文字列）。言語サーバーがなければ None。
@@ -77,6 +77,10 @@ pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("ctrl-s", Save, Some(CONTEXT)),
         KeyBinding::new("f12", GoToDefinition, Some(CONTEXT)),
+        KeyBinding::new("ctrl-d", AddNextOccurrence, Some(CONTEXT)),
+        KeyBinding::new("ctrl-shift-l", SelectAllOccurrences, Some(CONTEXT)),
+        KeyBinding::new("cmd-d", AddNextOccurrence, Some(CONTEXT)),
+        KeyBinding::new("cmd-shift-l", SelectAllOccurrences, Some(CONTEXT)),
     ]);
 }
 
@@ -114,6 +118,8 @@ pub struct EditorPanel {
     /// 自動保存の待ち。
     auto_save: Option<Task<()>>,
     window: AnyWindowHandle,
+    /// カーソルのある行（1 始まり。行番号の相対表示が読む）。
+    cursor_line: Rc<std::cell::Cell<usize>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -126,7 +132,7 @@ impl EditorPanel {
         let line_ending = if loaded.text.contains('\n') {
             loaded.line_ending
         } else {
-            match settings::ActiveSettings::get(cx).files.eol {
+            match settings::ActiveSettings::get(cx).files_for(&language).eol {
                 Eol::Lf => LineEnding::Lf,
                 Eol::Crlf => LineEnding::Crlf,
                 Eol::Auto if cfg!(windows) => LineEnding::Crlf,
@@ -161,13 +167,16 @@ impl EditorPanel {
                     this.schedule_auto_save(cx);
                 }
                 InputEvent::Focus => cx.emit(EditorEvent::Activated),
-                InputEvent::Blur if settings::ActiveSettings::get(cx).files.auto_save == AutoSave::OnFocusChange => {
+                InputEvent::Blur if this.files_settings(cx).auto_save == AutoSave::OnFocusChange => {
                     this.save_if_dirty(cx);
                 }
                 _ => {}
             }),
             // カーソル移動も含め、エディタの状態が変わったらステータスバーへ伝える。
-            cx.observe(&state, |_, _, cx| cx.emit(EditorEvent::Changed)),
+            cx.observe(&state, |this: &mut Self, state, cx| {
+                this.cursor_line.set(state.read(cx).cursor_position().line as usize + 1);
+                cx.emit(EditorEvent::Changed)
+            }),
             // 設定が変わったら、開いているエディタにもすぐ反映する。
             cx.observe_global_in::<settings::ActiveSettings>(window, |this, window, cx| {
                 this.apply_settings(window, cx)
@@ -189,6 +198,7 @@ impl EditorPanel {
             detected_indent,
             auto_save: None,
             window: window.window_handle(),
+            cursor_line: Rc::new(std::cell::Cell::new(1)),
             _subscriptions: subs,
         };
         this.apply_settings(window, cx);
@@ -226,17 +236,16 @@ impl EditorPanel {
     /// 保存する。設定に従って整形・手直ししてから、Rope のスナップショット（O(1)）を書き出す。
     /// 返り値のタスクは保存が終わると完了する（未保存の確認ダイアログから待つため）。
     pub fn save(&mut self, cx: &mut Context<Self>) -> Task<Result<(), String>> {
-        let s = settings::ActiveSettings::get(cx);
-        let format = s
-            .editor
+        let (editor_s, files_s) = (self.editor_settings(cx), self.files_settings(cx));
+        let format = editor_s
             .format_on_save
             .then(|| cx.try_global::<FormatOnSave>().cloned())
             .flatten()
             .and_then(|f| (f.0)(&self.path, cx));
         let fixes = file::SaveFixes {
-            trim_trailing_whitespace: s.files.trim_trailing_whitespace,
-            insert_final_newline: s.files.insert_final_newline,
-            trim_final_newlines: s.files.trim_final_newlines,
+            trim_trailing_whitespace: files_s.trim_trailing_whitespace,
+            insert_final_newline: files_s.insert_final_newline,
+            trim_final_newlines: files_s.trim_final_newlines,
         };
         self.saving = true;
         self.auto_save = None;
@@ -309,11 +318,11 @@ impl EditorPanel {
 
     /// `files.auto_save` が `after_delay` なら、最後の編集から少し待って保存する。
     fn schedule_auto_save(&mut self, cx: &mut Context<Self>) {
-        let s = settings::ActiveSettings::get(cx);
-        if s.files.auto_save != AutoSave::AfterDelay {
+        let files = self.files_settings(cx);
+        if files.auto_save != AutoSave::AfterDelay {
             return;
         }
-        let delay = Duration::from_millis(s.files.auto_save_delay.max(100));
+        let delay = Duration::from_millis(files.auto_save_delay.max(100));
         self.auto_save = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(delay).await;
             this.update(cx, |this, cx| {
@@ -338,8 +347,63 @@ impl EditorPanel {
         });
     }
 
+    /// この言語で使うエディタの設定（`"[言語]"` の上書きを重ねたもの）。
+    fn editor_settings(&self, cx: &App) -> settings::EditorSettings {
+        settings::ActiveSettings::get(cx).editor_for(&self.language)
+    }
+
+    /// この言語で使うファイルの設定（`"[言語]"` の上書きを重ねたもの）。
+    fn files_settings(&self, cx: &App) -> settings::FilesSettings {
+        settings::ActiveSettings::get(cx).files_for(&self.language)
+    }
+
+    /// Ctrl+D: 選んでいる文字（なければカーソルの単語）の、次に出てくる所も選ぶ。
+    fn add_next_occurrence(&mut self, cx: &mut Context<Self>) {
+        self.state.update(cx, |state, cx| {
+            let range = state.selected_range();
+            let text = state.text().clone();
+            if range.is_empty() {
+                if let Some(word) = text.word_range(range.start) {
+                    state.set_selected_range(word, cx);
+                }
+                return;
+            }
+            let needle = text.slice(range.clone()).to_string();
+            let hay = text.to_string();
+            let found = hay[range.end..]
+                .find(&needle)
+                .map(|i| range.end + i)
+                .or_else(|| hay[..range.start].find(&needle));
+            if let Some(start) = found {
+                state.add_selection(start..start + needle.len(), cx);
+            }
+        });
+    }
+
+    /// Ctrl+Shift+L: 選んでいる文字（なければカーソルの単語）が出てくる所を、すべて選ぶ。
+    fn select_all_occurrences(&mut self, cx: &mut Context<Self>) {
+        self.state.update(cx, |state, cx| {
+            let text = state.text().clone();
+            let mut range = state.selected_range();
+            if range.is_empty() {
+                match text.word_range(range.start) {
+                    Some(word) => range = word,
+                    None => return,
+                }
+            }
+            let needle = text.slice(range.clone()).to_string();
+            let hay = text.to_string();
+            state.set_selected_range(range.clone(), cx);
+            for (start, _) in hay.match_indices(&needle) {
+                if start != range.start {
+                    state.add_selection(start..start + needle.len(), cx);
+                }
+            }
+        });
+    }
+
     fn apply_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let s = settings::ActiveSettings::get(cx).editor.clone();
+        let s = self.editor_settings(cx);
         let tab = match self.detected_indent {
             Some(t) if s.detect_indentation => t,
             _ => TabSize {
@@ -371,6 +435,8 @@ impl EditorPanel {
                 cx,
             );
             state.set_active_line_only_when_focused(s.highlight_line_only_when_focused, window, cx);
+            state.set_rulers(s.rulers.clone(), cx);
+            state.set_multi_cursor_with_ctrl(s.multi_cursor_modifier == MultiCursorModifier::CtrlCmd);
         });
         let blink = match s.cursor_blinking {
             CursorBlinking::Blink => gpui_kit::component::input::CursorBlink::default(),
@@ -495,10 +561,19 @@ use gpui_kit::prelude::FluentBuilder as _;
 impl Render for EditorPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _ = &self.focus;
-        let line_height = settings::ActiveSettings::get(cx).editor.line_height.clamp(1.0, 3.0);
+        let s = self.editor_settings(cx);
+        let line_height = s.line_height.clamp(1.0, 3.0);
+        // editor.relative_line_numbers: 行番号はカーソルの行からの距離（カーソルの行は本来の番号）。
+        let gutter = if s.relative_line_numbers {
+            GutterStyle::default().with_relative_line_numbers(self.cursor_line.clone())
+        } else {
+            GutterStyle::default()
+        };
         div()
             .key_context(CONTEXT)
             .on_action(cx.listener(|this, _: &Save, _, cx| this.save(cx).detach()))
+            .on_action(cx.listener(|this, _: &AddNextOccurrence, _, cx| this.add_next_occurrence(cx)))
+            .on_action(cx.listener(|this, _: &SelectAllOccurrences, _, cx| this.select_all_occurrences(cx)))
             .on_action(cx.listener(|this, _: &Search, window, cx| this.open_find(false, window, cx)))
             .on_action(cx.listener(|this, _: &Replace, window, cx| this.open_find(true, window, cx)))
             .on_action(cx.listener(|this, _: &FindNext, window, cx| match &this.find_panel {
@@ -524,6 +599,7 @@ impl Render for EditorPanel {
                     .child(
                         div().flex_1().min_w_0().h_full().child(
                             Editor::new(&self.state)
+                                .gutter_style(gutter)
                                 .bordered(false)
                                 .h_full()
                                 .line_height(relative(line_height)),

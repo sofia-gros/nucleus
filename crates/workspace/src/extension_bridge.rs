@@ -241,16 +241,17 @@ impl Workspace {
             if !self.ext_views_added.insert(format!("{}/{}", v.extension, v.view.id)) {
                 continue;
             }
+            let (primary, secondary) = crate::side_bars(cx);
             let placement = match v.view.location {
-                ViewLocation::Left => DockPlacement::Left,
-                ViewLocation::Right => DockPlacement::Right,
+                ViewLocation::Left => primary,
+                ViewLocation::Right => secondary,
                 ViewLocation::Bottom => DockPlacement::Bottom,
                 ViewLocation::Editor => continue,
             };
             let panel = cx.new(|cx| ExtensionPanel::new(v.extension.clone(), v.view.clone(), window, cx));
             self.extension_panels.push(panel.downgrade());
-            if placement == DockPlacement::Right {
-                // 右ドックは Extension のビュー（Git など）を先頭にする（デザイン 08）。
+            if placement == secondary {
+                // 副サイドバー（ふつうは右ドック）は Extension のビュー（Git など）を先頭にする（デザイン 08）。
                 right.push(panel_handle(panel));
             } else {
                 self.dock_area.update(cx, |area, cx| {
@@ -268,16 +269,17 @@ impl Workspace {
             .cloned()
             .chain(self.outline_panel.clone())
             .collect();
+        let (_, secondary) = crate::side_bars(cx);
         self.dock_area.update(cx, |area, cx| {
-            let open = area.is_dock_open(DockPlacement::Right);
+            let open = area.is_dock_open(secondary);
             let mut layout = DockLayout::tabs();
             for h in all {
                 layout = layout.panel_view(h, cx);
             }
-            area.set_dock(DockPlacement::Right, layout, window, cx);
-            area.set_dock_size(DockPlacement::Right, gpui_kit::px(320.), window, cx);
-            if area.is_dock_open(DockPlacement::Right) != open {
-                area.toggle_dock(DockPlacement::Right, window, cx);
+            area.set_dock(secondary, layout, window, cx);
+            area.set_dock_size(secondary, gpui_kit::px(320.), window, cx);
+            if area.is_dock_open(secondary) != open {
+                area.toggle_dock(secondary, window, cx);
             }
         });
     }

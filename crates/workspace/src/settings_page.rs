@@ -113,6 +113,8 @@ enum Control {
     },
     /// 文字の一覧（glob など）。
     List,
+    /// 数の一覧（ルーラーの列など）。
+    NumberList,
 }
 
 /// 1つの設定。`key` は `editor.font_size` のように `.` でつなぐ。
@@ -164,6 +166,8 @@ const ITEMS: &[Item] = &[
     item(C::Editor, "editor.soft_wrap", SW),
     item(C::Editor, "editor.wrapping_indent", Control::Enum(&["none", "same"])),
     item(C::Editor, "editor.line_numbers", SW),
+    item(C::Editor, "editor.relative_line_numbers", SW),
+    item(C::Editor, "editor.rulers", Control::NumberList),
     item(C::Editor, "editor.indent_guides", SW),
     item(C::Editor, "editor.render_whitespace", Control::Enum(&["none", "all"])),
     item(C::Editor, "editor.folding", SW),
@@ -175,6 +179,11 @@ const ITEMS: &[Item] = &[
     item(C::Editor, "editor.highlight_line_only_when_focused", SW),
     item(C::Editor, "editor.format_on_save", SW),
     item(C::Editor, "editor.hover", SW),
+    item(
+        C::Editor,
+        "editor.multi_cursor_modifier",
+        Control::Enum(&["alt", "ctrl_cmd"]),
+    ),
     // ファイル
     item(
         C::Files,
@@ -188,6 +197,11 @@ const ITEMS: &[Item] = &[
     item(C::Files, "files.eol", Control::Enum(&["auto", "lf", "crlf"])),
     item(C::Files, "files.exclude", List),
     // ワークベンチ
+    item(
+        C::Workbench,
+        "workbench.side_bar_location",
+        Control::Enum(&["left", "right"]),
+    ),
     item(C::Workbench, "workbench.status_bar", SW),
     item(C::Workbench, "workbench.tree_indent", float(4.0, 40.0)),
     item(C::Workbench, "workbench.tree_indent_guides", SW),
@@ -416,7 +430,8 @@ impl SettingsPage {
                     })
                     .into_any_element()
             }
-            Control::List => self.list_control(key, window, cx),
+            Control::List => self.list_control(key, false, window, cx),
+            Control::NumberList => self.list_control(key, true, window, cx),
             Control::Number { .. } | Control::Text { .. } => {
                 let input = self.input(item, window, cx);
                 let wide = matches!(item.control, Control::Text { .. });
@@ -443,15 +458,34 @@ impl SettingsPage {
     }
 
     /// 文字の一覧（`files.exclude` など）。1 行ずつ消せて、下の欄で足せる。
-    fn list_control(&mut self, key: &'static str, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn list_control(
+        &mut self,
+        key: &'static str,
+        numeric: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let values: Vec<String> = current(key, cx)
             .as_array()
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| {
+                        v.as_str()
+                            .map(String::from)
+                            .or_else(|| v.as_u64().map(|n| n.to_string()))
+                    })
+                    .collect()
+            })
             .unwrap_or_default();
         let add = match self.list_inputs.get(key) {
             Some((i, _)) => i.clone(),
             None => {
-                let input = cx.new(|cx| InputState::new(window, cx).placeholder(cx.t("core.settings.list-add")));
+                let hint = if numeric {
+                    "core.settings.list-add-number"
+                } else {
+                    "core.settings.list-add"
+                };
+                let input = cx.new(|cx| InputState::new(window, cx).placeholder(cx.t(hint)));
                 let sub = cx.subscribe_in(&input, window, move |this, input, e: &InputEvent, window, cx| {
                     if !matches!(e, InputEvent::PressEnter { .. }) {
                         return;
@@ -460,9 +494,20 @@ impl SettingsPage {
                     if text.is_empty() {
                         return;
                     }
+                    let value = if numeric {
+                        match text.parse::<u64>() {
+                            Ok(n) if n <= 1000 => json!(n),
+                            _ => return,
+                        }
+                    } else {
+                        json!(text)
+                    };
                     let mut list: Vec<Value> = current(key, cx).as_array().cloned().unwrap_or_default();
-                    if !list.iter().any(|v| v.as_str() == Some(&text)) {
-                        list.push(json!(text));
+                    if !list.contains(&value) {
+                        list.push(value);
+                        if numeric {
+                            list.sort_by_key(|v| v.as_u64());
+                        }
                         this.set(key, Value::Array(list), cx);
                     }
                     input.update(cx, |s, cx| s.set_value("", window, cx));
