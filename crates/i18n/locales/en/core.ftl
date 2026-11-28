@@ -228,3 +228,4 @@ core-status-extension-updates = { $count ->
         [one] 1 update
        *[other] { $count } updates
     }
+core-extensions-updated-notify = { $name } was updated to { $version }.

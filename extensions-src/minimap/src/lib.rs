@@ -100,7 +100,9 @@ impl Extension for Minimap {
         if STATE.with(|s| s.borrow().hidden) {
             return h_stack();
         }
-        let Some(v) = host::editor_view(id) else { return h_stack() };
+        let Some(v) = host::editor_view(id) else {
+            return h_stack();
+        };
         let mode = Mode::current();
         let (width, _) = mode.metrics();
         let rects = STATE.with(|s| {

@@ -126,14 +126,18 @@ impl ExtensionPanel {
             }
         }));
         // Extension の設定が変わったら描き直す。
-        this._subscriptions.push(cx.observe_global::<settings::ActiveSettings>(|this, cx| {
-            crate::extension_bridge::sync_extension_settings(cx);
-            let mine = settings::ActiveSettings::get(cx).extension_settings.get(&this.extension).cloned();
-            if mine != this.last_settings {
-                this.last_settings = mine;
-                this.refresh(cx);
-            }
-        }));
+        this._subscriptions
+            .push(cx.observe_global::<settings::ActiveSettings>(|this, cx| {
+                crate::extension_bridge::sync_extension_settings(cx);
+                let mine = settings::ActiveSettings::get(cx)
+                    .extension_settings
+                    .get(&this.extension)
+                    .cloned();
+                if mine != this.last_settings {
+                    this.last_settings = mine;
+                    this.refresh(cx);
+                }
+            }));
         this.refresh(cx);
         this
     }
@@ -546,14 +550,7 @@ impl ExtensionPanel {
                                     continue;
                                 }
                                 let line = window.text_system().shape_line(text.clone(), *size, runs, None);
-                                let _ = line.paint(
-                                    bounds.origin + *origin,
-                                    *size,
-                                    TextAlign::Left,
-                                    None,
-                                    window,
-                                    cx,
-                                );
+                                let _ = line.paint(bounds.origin + *origin, *size, TextAlign::Left, None, window, cx);
                             }
                         });
                     },

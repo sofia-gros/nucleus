@@ -28,9 +28,8 @@ use std::{
 use editor::{EditorEvent, EditorPanel, LoadError};
 use gpui_kit::{
     App, AppContext as _, Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _, IntoElement,
-    StatefulInteractiveElement as _,
-    KeyBinding, ParentElement, PathPromptOptions, Render, SharedString, Styled, Subscription, Task, WeakEntity, Window,
-    WindowBounds, WindowOptions, actions,
+    KeyBinding, ParentElement, PathPromptOptions, Render, SharedString, StatefulInteractiveElement as _, Styled,
+    Subscription, Task, WeakEntity, Window, WindowBounds, WindowOptions, actions,
     assets::IconName,
     component::{
         Icon, Sizable as _, TitleBar, WindowExt as _,

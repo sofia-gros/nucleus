@@ -195,6 +195,7 @@ impl ExtensionsPage {
         self.removed.remove(&entry.id);
         cx.notify();
         let e = entry.clone();
+        let updating = ExtensionStore::get(cx).is_some_and(|s| s.extensions.iter().any(|x| x.manifest.id == entry.id));
         let task = cx.background_spawn(async move { registry::install(&e, &url, &dest) });
         cx.spawn_in(window, async move |this, cx| {
             let r = task.await;
@@ -204,8 +205,15 @@ impl ExtensionsPage {
                 recompute_updates(cx);
                 let n = match r {
                     Ok(()) => Notification::success(cx.t_args(
-                        "core.extensions.installed-notify",
-                        &[("name", entry.name.clone().into())],
+                        if updating {
+                            "core.extensions.updated-notify"
+                        } else {
+                            "core.extensions.installed-notify"
+                        },
+                        &[
+                            ("name", entry.name.clone().into()),
+                            ("version", entry.version.clone().into()),
+                        ],
                     )),
                     Err(err) => Notification::error(cx.t_args(
                         "core.extensions.install-failed",
@@ -440,12 +448,7 @@ impl ExtensionsPage {
                                     .child(s.title.clone()),
                             )
                             .when_some(s.description.clone(), |d, desc| {
-                                d.child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.token(Token::MutedForeground))
-                                        .child(desc),
-                                )
+                                d.child(div().text_xs().text_color(cx.token(Token::MutedForeground)).child(desc))
                             }),
                     )
                     .child(h_flex().gap_1().children(buttons))
@@ -828,7 +831,9 @@ pub fn is_newer(a: &str, b: &str) -> bool {
 
 /// 一覧と、入れてある Extension（組み込みは除く）を比べる。
 pub fn compute_updates(index: &Index, cx: &App) -> Vec<Update> {
-    let Some(store) = ExtensionStore::get(cx) else { return Vec::new() };
+    let Some(store) = ExtensionStore::get(cx) else {
+        return Vec::new();
+    };
     store
         .extensions
         .iter()

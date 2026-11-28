@@ -37,7 +37,9 @@ pub struct RunExtensionCommand {
 
 /// 利用者の Extension の設定を、動いている Extension から読めるようにする。値が変わったら true。
 pub fn sync_extension_settings(cx: &App) -> bool {
-    let Some(h) = cx.try_global::<WasmHost>() else { return false };
+    let Some(h) = cx.try_global::<WasmHost>() else {
+        return false;
+    };
     let settings = settings::ActiveSettings::get(cx).extension_settings.clone();
     h.context.set_extension_settings(settings)
 }
@@ -396,12 +398,17 @@ impl Workspace {
                     &[("count", updates.len().into()), ("list", list.into())],
                 );
                 let open = cx.t("core.extensions.open");
-                let n = Notification::info(msg).action(move |_, _, _| {
+                let n = Notification::info(msg).action(move |_, _, cx| {
+                    // 押したら拡張機能の画面を開き、この通知を閉じる。
+                    let this = cx.entity().downgrade();
                     Button::new("open-extensions")
                         .small()
                         .primary()
                         .label(open.clone())
-                        .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::OpenExtensions), cx))
+                        .on_click(move |_, window, cx| {
+                            window.dispatch_action(Box::new(crate::OpenExtensions), cx);
+                            this.update(cx, |n, cx| n.dismiss(window, cx)).ok();
+                        })
                 });
                 window.push_notification(n, cx);
             })

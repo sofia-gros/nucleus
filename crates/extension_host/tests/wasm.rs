@@ -167,6 +167,7 @@ fn fake_ui_any(rx: futures::channel::mpsc::UnboundedReceiver<UiRequest>) -> std:
 }
 
 const MINIMAP_WASM: &[u8] = include_bytes!("../../../extensions-src/minimap/package/minimap.wasm");
+
 const MINIMAP_MANIFEST: &str = include_str!("../../../extensions-src/minimap/package/extension.yaml");
 
 /// MiniMap: エディタの内容から四角形を描き、クリックでエディタを動かす。
@@ -262,4 +263,51 @@ fn extensions_built_for_api_1_0_still_load() {
     block_on(ready).unwrap().expect("1.0.0 activates");
     let r = block_on(ext.render("minimap@1")).unwrap().unwrap();
     assert!(r.nodes.len() >= 2);
+}
+
+/// 1.1.0: 設定（get-setting）で文字の表示に切り替えると、canvas-text で文字を描く。
+#[test]
+fn minimap_text_mode_follows_the_setting() {
+    let manifest = Manifest::from_yaml(MINIMAP_MANIFEST).unwrap();
+    let (host, rx) = HostContext::new();
+    std::thread::spawn(move || {
+        let mut rx = rx;
+        while let Some(req) = block_on(rx.next()) {
+            match req {
+                UiRequest::EditorView { reply, .. } => {
+                    let _ = reply.send(Some(extension_host::EditorViewInfo {
+                        version: 1,
+                        first_line: 0,
+                        last_line: 9,
+                        line_count: 50,
+                        cursor_line: 0,
+                        height: 400.0,
+                    }));
+                }
+                UiRequest::EditorText { reply, .. } => {
+                    let _ = reply.send(Some("fn main() { let x = 1; }\n".repeat(50)));
+                }
+                _ => {}
+            }
+        }
+    });
+    let ctx = host.clone();
+    let (ext, ready) = runtime::spawn(manifest, Arc::from(MINIMAP_WASM), host);
+    block_on(ready).unwrap().expect("activate");
+
+    // 既定（blocks）: 文字はない。
+    let r = block_on(ext.render("minimap@1")).unwrap().unwrap();
+    assert!(r.texts.is_empty());
+
+    let mut s = extension_host::runtime::ExtensionSettings::new();
+    s.entry("nucleus.minimap".into())
+        .or_default()
+        .insert("mode".into(), serde_json::json!("text"));
+    assert!(ctx.set_extension_settings(s));
+    let r = block_on(ext.render("minimap@1")).unwrap().unwrap();
+    let lines = &r.texts["map"];
+    assert_eq!(lines.len(), 50);
+    let first: String = lines[0].spans.iter().map(|s| s.text.as_str()).collect();
+    assert_eq!(first, "fn main() { let x = 1; }");
+    assert_eq!(lines[0].spans[0].color, "highlight.syntax.keyword");
 }

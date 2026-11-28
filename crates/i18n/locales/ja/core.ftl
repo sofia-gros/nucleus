@@ -193,3 +193,4 @@ core-extensions-off = オフ
 core-extensions-open = 拡張機能を開く
 core-extensions-updates-available = 拡張機能の更新が { $count } 件あります: { $list }
 core-status-extension-updates = 更新 { $count } 件
+core-extensions-updated-notify = { $name } を { $version } に更新しました。
