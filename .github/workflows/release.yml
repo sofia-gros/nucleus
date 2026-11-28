@@ -1,0 +1,101 @@
+name: Release
+
+# `v1.0.0` のようなタグを push すると、Windows / macOS / Linux の配布物を作って GitHub Releases に出す。
+# `-` を含むタグ（`v1.0.0-beta.1` など）はプレリリースにする。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p nucleus
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist/Nucleus -Force
+          Copy-Item target/release/nucleus.exe dist/Nucleus/
+          Copy-Item README.md dist/Nucleus/
+          Compress-Archive -Path dist/Nucleus -DestinationPath nucleus-windows-x86_64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: nucleus-windows-x86_64.zip
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p nucleus --target aarch64-apple-darwin
+      - run: cargo build --release -p nucleus --target x86_64-apple-darwin
+      - name: Package (universal .app)
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          APP=dist/Nucleus.app
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          lipo -create -output "$APP/Contents/MacOS/nucleus" \
+            target/aarch64-apple-darwin/release/nucleus target/x86_64-apple-darwin/release/nucleus
+          sed "s/__VERSION__/${VERSION}/g" packaging/macos/Info.plist > "$APP/Contents/Info.plist"
+          # 署名していないので、初回は右クリック →「開く」で起動する（README 参照）。ad-hoc 署名だけ付ける。
+          codesign --force --deep --sign - "$APP"
+          cd dist && ditto -c -k --keepParent Nucleus.app ../nucleus-macos-universal.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: nucleus-macos-universal.zip
+
+  linux:
+    runs-on: ubuntu-22.04 # 古めの glibc でビルドして、多くのディストリビューションで動くようにする
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev \
+            libx11-xcb-dev libfontconfig1-dev libfreetype-dev
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p nucleus
+      - name: Package
+        run: |
+          mkdir -p dist/nucleus
+          cp target/release/nucleus README.md dist/nucleus/
+          cp packaging/linux/nucleus.desktop dist/nucleus/
+          tar -czf nucleus-linux-x86_64.tar.gz -C dist nucleus
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: nucleus-linux-x86_64.tar.gz
+
+  release:
+    needs: [windows, macos, linux]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Checksums
+        run: cd assets && sha256sum * > SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: assets/*
+          name: Nucleus ${{ github.ref_name }}
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true

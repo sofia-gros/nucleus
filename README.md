@@ -25,6 +25,18 @@ Core は小さく速く保ち、機能はすべて Extension で足します。
 | `crates/extension_api` | Extension 作者向けの SDK と WIT（`nucleus:extension@1.0.0`） |
 | `crates/workspace` | メインウィンドウ（TitleBar / DockArea / StatusBar）、パネル、コマンドパレット、ファイル検索、セッション |
 
+## インストール
+
+[Releases](https://github.com/sofia-gros/nucleus/releases) から、使っている OS の配布物を落とします。
+
+| OS | 配布物 | 使い方 |
+|---|---|---|
+| Windows (x86_64) | `nucleus-windows-x86_64.zip` | 展開して `Nucleus/nucleus.exe` を起動 |
+| macOS (Apple Silicon / Intel) | `nucleus-macos-universal.zip` | 展開した `Nucleus.app` を「アプリケーション」へ。署名していないので、初回は右クリック →「開く」 |
+| Linux (x86_64) | `nucleus-linux-x86_64.tar.gz` | 展開して `nucleus/nucleus` を起動（`nucleus.desktop` をメニュー登録に使える） |
+
+`SHA256SUMS.txt` で配布物を確かめられます。リリースは `v*` のタグを push すると CI（`.github/workflows/release.yml`）が作ります。
+
 ## ビルドと実行
 
 Linux では次のライブラリが必要です（Ubuntu / Debian）:

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Nucleus
+Comment=A hackable, fast code editor
+Exec=nucleus %F
+Terminal=false
+Categories=Development;TextEditor;IDE;
+StartupWMClass=nucleus
