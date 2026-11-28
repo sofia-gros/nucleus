@@ -18,7 +18,7 @@ use gpui_kit::{
         button::{Button, ButtonVariants as _},
         dock::{BasePanel, Panel, PanelEvent},
         h_flex,
-        input::{Input, InputEvent, InputState, Textarea, TextareaState},
+        input::{InputEvent, InputState, TextareaState},
         notification::Notification,
         skeleton::Skeleton,
         v_flex,
@@ -292,8 +292,8 @@ impl ExtensionPanel {
             }
         }
         match &slot.handle {
-            InputHandle::Single(s) => Input::new(s).small().into_any_element(),
-            InputHandle::Multi(s) => Textarea::new(s).small().into_any_element(),
+            InputHandle::Single(s) => editor::fields::input(s, window, cx).small().into_any_element(),
+            InputHandle::Multi(s) => editor::fields::textarea(s, window, cx).into_any_element(),
         }
     }
 

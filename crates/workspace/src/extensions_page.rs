@@ -18,7 +18,7 @@ use gpui_kit::{
         button::{Button, ButtonVariants as _},
         dock::{BasePanel, Panel, PanelEvent},
         h_flex,
-        input::{Input, InputEvent, InputState},
+        input::{InputEvent, InputState},
         notification::Notification,
         v_flex,
     },
@@ -478,7 +478,11 @@ impl ExtensionsPage {
                     v_flex()
                         .items_end()
                         .gap_0p5()
-                        .child(div().w(px(96.)).child(Input::new(&input).small()))
+                        .child(
+                            div()
+                                .w(px(96.))
+                                .child(editor::fields::input(&input, window, cx).small()),
+                        )
                         .child(
                             div()
                                 .text_xs()
@@ -875,7 +879,7 @@ impl Render for ExtensionsPage {
                             }),
                     )
                     .child(
-                        Input::new(&self.query).small().prefix(
+                        editor::fields::input(&self.query, window, cx).small().prefix(
                             Icon::new(IconName::Search)
                                 .small()
                                 .text_color(cx.token(Token::MutedForeground)),

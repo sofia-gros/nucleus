@@ -12,7 +12,7 @@ use gpui_kit::{
         button::{Button, ButtonVariants as _},
         dock::{BasePanel, Panel, PanelEvent},
         h_flex,
-        input::{Input, InputEvent, InputState},
+        input::{InputEvent, InputState},
         menu::{DropdownMenu as _, PopupMenu},
         switch::Switch,
         v_flex,
@@ -316,7 +316,7 @@ impl SettingsPage {
                     .child(
                         div()
                             .w(px(if wide { 280. } else { 96. }))
-                            .child(Input::new(&input).small()),
+                            .child(editor::fields::input(&input, window, cx).small()),
                     )
                     .when(invalid, |d| {
                         d.child(
@@ -477,7 +477,7 @@ impl Render for SettingsPage {
                             .gap_3()
                             .child(
                                 div().flex_1().child(
-                                    Input::new(&self.search).small().prefix(
+                                    editor::fields::input(&self.search, window, cx).small().prefix(
                                         Icon::new(IconName::Search)
                                             .small()
                                             .text_color(cx.token(Token::MutedForeground)),

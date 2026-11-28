@@ -10,7 +10,7 @@ use gpui_kit::{
         button::{Button, ButtonVariants as _},
         h_flex,
         input::{
-            Copy, Cut, GoToDefinition, Indent, Input, InputState, Outdent, Paste, Redo, Replace, Search, SelectAll,
+            Copy, Cut, GoToDefinition, Indent, InputState, Outdent, Paste, Redo, Replace, Search, SelectAll,
             SelectToEndOfLine, SelectToStartOfLine, Undo,
         },
         menu::{DropdownMenu as _, PopupMenu},
@@ -234,14 +234,14 @@ impl Workspace {
         let ok = cx.t("core.clone.choose-folder");
         let hint = cx.t("core.clone.hint");
         url.update(cx, |s, cx| s.focus(window, cx));
-        window.open_dialog(cx, move |dialog, _, cx| {
+        window.open_dialog(cx, move |dialog, window, cx| {
             let url = url.clone();
             let this = this.clone();
             dialog
                 .title(title.clone())
                 .w(gpui_kit::px(520.))
                 .child(
-                    v_flex().gap_2().child(Input::new(&url)).child(
+                    v_flex().gap_2().child(editor::fields::input(&url, window, cx)).child(
                         div()
                             .text_xs()
                             .text_color(cx.token(Token::MutedForeground))

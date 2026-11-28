@@ -311,3 +311,5 @@ core-tree-exists = { $name } already exists.
 core-tree-invalid-name = Enter a name without / or \\.
 core-tree-confirm-delete = Move { $name } to the trash?
 core-tree-delete-detail = You can restore it from the trash.
+core-tree-exists-folder = A folder named { $name } already exists in { $dir }.
+core-tree-exists-file = A file named { $name } already exists in { $dir }.

@@ -9,7 +9,7 @@ use gpui_kit::{
         Icon, Sizable as _,
         button::{Button, ButtonVariants as _},
         h_flex,
-        input::{EditorState, Input, InputEvent, InputState},
+        input::{EditorState, InputEvent, InputState},
         v_flex,
     },
     div,
@@ -175,7 +175,7 @@ impl Focusable for FindPanel {
 }
 
 impl Render for FindPanel {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let case = self.case_sensitive;
         let toggle = Button::new("case")
             .xsmall()
@@ -227,7 +227,7 @@ impl Render for FindPanel {
             .child(
                 h_flex()
                     .gap_2()
-                    .child(div().flex_1().child(Input::new(&self.find)))
+                    .child(div().flex_1().child(crate::fields::input(&self.find, window, cx)))
                     .child(
                         Button::new("prev")
                             .outline()
@@ -249,7 +249,7 @@ impl Render for FindPanel {
             .child(
                 h_flex()
                     .gap_2()
-                    .child(div().flex_1().child(Input::new(&self.replace)))
+                    .child(div().flex_1().child(crate::fields::input(&self.replace, window, cx)))
                     .child(
                         button("replace", "core.find.replace", cx)
                             .on_click(cx.listener(|this, _, window, cx| this.replace_one(window, cx))),

@@ -13,7 +13,6 @@ use gpui_kit::{
         button::{Button, ButtonVariants as _},
         dock::{BasePanel, Panel, PanelEvent},
         h_flex,
-        input::Input,
         menu::ContextMenuExt as _,
         v_flex,
     },
@@ -25,14 +24,27 @@ use i18n::Translate as _;
 use project::{DirWatcher, EntryKind, ProjectTree, Row};
 use theme::{Token, TokenColors as _};
 
+/// インデントの縦線（VSCode と同じく、祖先のフォルダの矢印の真下に引く）。
+fn indent_guides(depth: usize, cx: &App) -> Vec<gpui_kit::Div> {
+    (0..depth)
+        .map(|level| {
+            div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .left(px(8. + level as f32 * 16. + 7.))
+                .w(px(1.))
+                .bg(cx.token(Token::MutedForeground).opacity(0.4))
+        })
+        .collect()
+}
+
 /// ツリーに並べる1行。
 #[derive(Clone, Copy)]
 enum Slot {
     Row(usize),
     /// 新しく作るものの名前を入れる行（深さ）。
     NewInput(usize),
-    /// 入力の誤りを出す行（深さ）。
-    Error(usize),
 }
 
 pub enum ProjectPanelEvent {
@@ -130,44 +142,35 @@ impl ProjectPanel {
         }
     }
 
-    /// 表示する行（ツリーの行と、新しく作るときの入力欄・エラーの行）。
+    /// 表示する行（ツリーの行と、新しく作るときの入力欄の行）。名前の変更はその行の中で入力する。
     fn slots(&self) -> Vec<Slot> {
         let mut out: Vec<Slot> = (0..self.rows.len()).map(Slot::Row).collect();
-        let Some(edit) = &self.editing else { return out };
-        let (at, depth) = match edit.kind {
-            crate::project_actions::EditKind::Rename => {
-                let Some(ix) = edit
-                    .target
-                    .as_ref()
-                    .and_then(|t| self.rows.iter().position(|r| &r.path == t))
-                else {
-                    return out;
-                };
-                (ix + 1, None)
-            }
-            _ => {
-                let parent = self.rows.iter().position(|r| r.path == edit.dir);
-                let depth = parent.map_or(1, |p| self.rows[p].depth + 1);
-                let at = parent.map_or(0, |p| p + 1);
-                out.insert(at, Slot::NewInput(depth));
-                (at + 1, Some(depth))
-            }
-        };
-        if edit.error.is_some() {
-            let depth = depth.unwrap_or_else(|| self.rows.get(at - 1).map_or(1, |r| r.depth));
-            out.insert(at, Slot::Error(depth));
+        if let Some(edit) = &self.editing
+            && edit.kind != crate::project_actions::EditKind::Rename
+        {
+            let parent = self.rows.iter().position(|r| r.path == edit.dir);
+            let depth = parent.map_or(1, |p| self.rows[p].depth + 1);
+            out.insert(parent.map_or(0, |p| p + 1), Slot::NewInput(depth));
         }
         out
     }
 
     /// 名前を入れる行（新しく作るとき）。
-    fn render_input_row(&self, ix: usize, depth: usize, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+    fn render_input_row(
+        &self,
+        ix: usize,
+        depth: usize,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> gpui_kit::AnyElement {
         let Some(edit) = &self.editing else {
             return div().into_any_element();
         };
         let folder = edit.kind == crate::project_actions::EditKind::NewFolder;
         h_flex()
             .id(("new", ix))
+            .relative()
+            .children(indent_guides(depth, cx))
             .h(px(24.))
             .w_full()
             .pl(px(8. + depth as f32 * 16.))
@@ -183,46 +186,50 @@ impl ProjectPanel {
                         Token::ListHighlightForeground
                     })),
             )
-            .child(self.render_edit_input(cx))
+            .child(self.render_edit_input(window, cx))
             .into_any_element()
     }
 
     /// 入力欄そのもの（Esc で取り消す）。
-    fn render_edit_input(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+    fn render_edit_input(&self, window: &Window, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let Some(edit) = &self.editing else {
             return div().into_any_element();
         };
         div()
             .flex_1()
             .min_w_0()
+            .relative()
             .on_key_down(cx.listener(|this, e: &gpui_kit::KeyDownEvent, _, cx| {
                 if e.keystroke.key == "escape" {
                     this.cancel_edit(cx);
                     cx.stop_propagation();
                 }
             }))
-            .child(Input::new(&edit.input).xsmall().when(edit.error.is_some(), |i| {
-                i.border_color(cx.token(Token::HighlightError))
-            }))
-            .into_any_element()
-    }
-
-    fn render_error_row(&self, ix: usize, depth: usize, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
-        let message = self.editing.as_ref().and_then(|e| e.error.clone()).unwrap_or_default();
-        div()
-            .id(("error", ix))
-            .h(px(24.))
-            .w_full()
-            .pl(px(8. + depth as f32 * 16. + 34.))
-            .pr_2()
-            .flex()
-            .items_center()
-            .text_xs()
-            .text_color(cx.token(Token::HighlightError))
-            .overflow_hidden()
-            .whitespace_nowrap()
-            .text_ellipsis()
-            .child(message)
+            .child(
+                editor::fields::input(&edit.input, window, cx)
+                    .xsmall()
+                    .when(edit.error.is_some(), |i| {
+                        i.border_color(cx.token(Token::HighlightError))
+                    }),
+            )
+            // 誤りは入力欄のすぐ下に、下の行に重ねて出す（VSCode と同じ。長い文は折り返す）。
+            .when_some(edit.error.clone(), |d, message| {
+                d.child(gpui_kit::deferred(
+                    div()
+                        .absolute()
+                        .top(px(21.))
+                        .left_0()
+                        .right_0()
+                        .px_2()
+                        .py_1()
+                        .border_1()
+                        .border_color(cx.token(Token::HighlightError))
+                        .bg(cx.token(Token::SidebarBackground))
+                        .text_xs()
+                        .text_color(cx.token(Token::Foreground))
+                        .child(message),
+                ))
+            })
             .into_any_element()
     }
 
@@ -274,7 +281,7 @@ impl ProjectPanel {
         cx.notify();
     }
 
-    fn render_row(&self, ix: usize, row: &Row, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+    fn render_row(&self, ix: usize, row: &Row, window: &Window, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let selected = self.selected.as_ref() == Some(&row.path);
         let is_dir = row.kind == EntryKind::Dir;
         let chevron = if is_dir {
@@ -298,6 +305,8 @@ impl ProjectPanel {
         };
         h_flex()
             .id(ix)
+            .relative()
+            .children(indent_guides(row.depth, cx))
             .h(px(24.))
             .w_full()
             .pl(px(8. + row.depth as f32 * 16.))
@@ -321,7 +330,7 @@ impl ProjectPanel {
                     e.kind == crate::project_actions::EditKind::Rename && e.target.as_ref() == Some(&row.path)
                 });
                 if renaming {
-                    return d.child(self.render_edit_input(cx));
+                    return d.child(self.render_edit_input(window, cx));
                 }
                 d.child(
                     div()
@@ -436,13 +445,12 @@ impl Render for ProjectPanel {
             uniform_list(
                 "project-tree",
                 slots.len(),
-                cx.processor(move |this, range: std::ops::Range<usize>, _, cx| {
+                cx.processor(move |this, range: std::ops::Range<usize>, window, cx| {
                     let mut items = Vec::with_capacity(range.len());
                     for ix in range {
                         items.push(match slots[ix] {
-                            Slot::Row(r) => this.render_row(r, &rows[r], cx),
-                            Slot::NewInput(depth) => this.render_input_row(ix, depth, cx),
-                            Slot::Error(depth) => this.render_error_row(ix, depth, cx),
+                            Slot::Row(r) => this.render_row(r, &rows[r], window, cx),
+                            Slot::NewInput(depth) => this.render_input_row(ix, depth, window, cx),
                         });
                     }
                     items

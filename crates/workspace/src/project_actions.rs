@@ -205,8 +205,18 @@ impl ProjectPanel {
         let result: Result<(), String> = if !valid_name(&name) {
             Err(cx.t("core.tree.invalid-name").to_string())
         } else if dir.join(&name).exists() {
+            // どこに、何（ファイルかフォルダか）があるのかを言う（VSCode と同じ）。
+            let key = if dir.join(&name).is_dir() {
+                "core.tree.exists-folder"
+            } else {
+                "core.tree.exists-file"
+            };
+            let place = dir
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| dir.display().to_string());
             Err(cx
-                .t_args("core.tree.exists", &[("name", name.clone().into())])
+                .t_args(key, &[("name", name.clone().into()), ("dir", place.into())])
                 .to_string())
         } else {
             let new = dir.join(&name);

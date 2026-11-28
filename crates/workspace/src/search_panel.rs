@@ -22,7 +22,7 @@ use gpui_kit::{
         button::{Button, ButtonVariants as _},
         dock::{BasePanel, Panel, PanelEvent},
         h_flex,
-        input::{Input, InputEvent, InputState},
+        input::{InputEvent, InputState},
         v_flex,
     },
     div,
@@ -426,7 +426,7 @@ impl Panel for SearchPanel {
 }
 
 impl Render for SearchPanel {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let toggle = |id: &'static str, label: &'static str, tip: &str, on: bool, which: u8, cx: &mut Context<Self>| {
             Button::new(id)
                 .xsmall()
@@ -446,7 +446,7 @@ impl Render for SearchPanel {
                     .p_2()
                     .gap_1p5()
                     .child(
-                        Input::new(&self.query).small().prefix(
+                        editor::fields::input(&self.query, window, cx).small().prefix(
                             Icon::new(IconName::Search)
                                 .small()
                                 .text_color(cx.token(Token::MutedForeground)),
@@ -455,7 +455,11 @@ impl Render for SearchPanel {
                     .child(
                         h_flex()
                             .gap_1()
-                            .child(div().flex_1().child(Input::new(&self.replace).small()))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .child(editor::fields::input(&self.replace, window, cx).small()),
+                            )
                             .child(
                                 Button::new("replace-all")
                                     .xsmall()
@@ -479,7 +483,11 @@ impl Render for SearchPanel {
                                 cx,
                             ))
                             .child(toggle("word", "ab", "core.search.whole-word", self.whole_word, 2, cx))
-                            .child(div().flex_1().child(Input::new(&self.include).xsmall())),
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .child(editor::fields::input(&self.include, window, cx).xsmall()),
+                            ),
                     )
                     .child(
                         div()

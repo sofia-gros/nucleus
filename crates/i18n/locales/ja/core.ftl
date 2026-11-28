@@ -276,3 +276,5 @@ core-tree-exists = { $name } はもうあります。
 core-tree-invalid-name = / や \\ を含まない名前を入れてください。
 core-tree-confirm-delete = { $name } をごみ箱に移しますか？
 core-tree-delete-detail = ごみ箱から元に戻せます。
+core-tree-exists-folder = { $dir } にはすでに { $name } という名前のフォルダがあります。
+core-tree-exists-file = { $dir } にはすでに { $name } という名前のファイルがあります。

@@ -2,6 +2,7 @@
 
 pub mod diff;
 pub mod diff_view;
+pub mod fields;
 pub mod file;
 mod find_panel;
 
