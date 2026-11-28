@@ -288,6 +288,14 @@ l10n: l10n/                  # l10n/core.ftl, l10n/anthropic.claude.ftl …
    - 設定 `disabled_extensions` で Extension を無効にできる。
    - 例: 組み込みのテーマ Extension `extensions/nucleus.theme-nord`、言語パックの例 `examples/extensions/locale-es`。
    - 未対応: `theme.icons`（アイコンテーマ）、Extension からの tree-sitter 文法の読み込み（文法は今も Core に同梱。対応付けだけ Extension で足せる）。
-6. **P5 WASM:** `core@1` の API、コマンド、言語サーバーの起動設定 → LSP
+6. **P5 WASM:** `core@1` の API、コマンド、言語サーバーの起動設定 → LSP — **完了**
+   - `lsp`: 自前の LSP クライアント（JSON-RPC、読み書きは専用スレッド、位置は utf-32 を優先して交渉）。`contributes.language_servers` と `language: [servers]` + `process: [<コマンド>]` で起動する。組み込みの `extensions/nucleus.lang-rust`（rust-analyzer）。
+   - エディタ: 診断（下線と Problems パネル、ステータスバーの件数）、補完、ホバー、定義へ移動（`F12`、別ファイルにも飛ぶ）。
+   - WASM: wasmtime の Component Model。WIT は `crates/extension_api/wit/nucleus.wit`（`nucleus:extension@1.0.0`）、Extension 作者向けの SDK は `crates/extension_api`（crate 名 `nucleus-extension-api`、`export_extension!`）。`wasm32-wasip2` でビルドする。
+   - ホスト関数（`core@1`）: `log` / `notify` / `workspace-root` / `read-file`（`workspace: [fs.read]`）/ `write-file`（`workspace: [fs.write]`）/ `active-document`（`editor: [read]`）/ `replace-active-text`（`editor: [edit]`、元に戻せる）/ `run-process`（`process: [<コマンド>]`、名前だけ。パスは不可）。権限は呼ぶたびに確かめ、なければエラーを返す。ファイルはワークスペースの中だけ（`..`・外への絶対パス・シンボリックリンクでの脱出を拒む）。
+   - 段階3: 段階1の後に、`main` を持つ Extension を1つずつ専用スレッドで起動して `activate` を呼ぶ。1回の呼び出しは 5 秒（epoch 割り込み）、メモリは 64MB まで。打ち切られた Extension はそれ以降止める。WASI は p2 で、ファイル・ネットワーク・環境変数は渡さない。
+   - `contributes.commands` はコマンドパレットに並び、`key` でショートカットも登録される。コマンド ID は `<Extension 名>.` で始める。
+   - 例: 組み込みの `extensions/nucleus.word-tools`（ソースは `extensions-src/word-tools`、`build.sh` で WASM を作り直す）。単語数を数える・行を並べ替える（`Ctrl+Alt+S`）。
+   - 未対応: `run-process` の時間切れ（WASM の 5 秒の外で待つ）、同時起動数の上限と優先順位、`network` 権限を使う API、Extension の言語サーバー以外からの LSP 利用、utf-16 のサーバーでの診断位置の厳密な変換。
 7. **P6 UI API:** `ui@1`、`ui_bridge`、スロット → 公式の Git Extension を UI 付きで作る
 8. **P7 仕上げ:** プロジェクト全体検索、Diff、拡張機能の管理画面、Light テーマの調整

@@ -1,12 +1,56 @@
 //! 起動後の段階的な反映（docs/ARCHITECTURE.md §5）。
-//! 段階1（データ系の権限）をここで行う。段階2（UI）と段階3（WASM）は P5・P6 で加わる。
+//! 段階1（データ系の権限）と段階3（WASM の起動）をここで行う。段階2（UI）は P6 で加わる。
 
 use std::{collections::HashMap, sync::Arc, time::Instant};
 
 use gpui_kit::{App, AppContext as _, Global};
 use theme::ExtTokenSet;
 
-use crate::loader::{self, FailedExtension, LoadedExtension};
+use crate::{
+    loader::{self, FailedExtension, LoadedExtension},
+    manifest::CommandContribution,
+    runtime::{self, HostContext, UiRequest, WasmExtension},
+};
+
+/// Extension が提供するコマンド。
+#[derive(Clone, Debug)]
+pub struct ExtensionCommand {
+    pub extension: String,
+    pub command: CommandContribution,
+}
+
+/// 段階3: 起動した WASM の Extension（gpui の Global）。
+pub struct WasmHost {
+    pub context: HostContext,
+    /// UI へのお願い。workspace が最初に1回だけ取り出す。
+    requests: Option<futures::channel::mpsc::UnboundedReceiver<UiRequest>>,
+    pub running: HashMap<String, Arc<WasmExtension>>,
+    /// 起動できなかったもの（ID, 理由）。
+    pub failed: Vec<(String, String)>,
+    /// 起動中の数。
+    pub starting: usize,
+}
+
+impl Global for WasmHost {}
+
+impl WasmHost {
+    pub fn take_requests(cx: &mut App) -> Option<futures::channel::mpsc::UnboundedReceiver<UiRequest>> {
+        if !cx.has_global::<WasmHost>() {
+            return None;
+        }
+        cx.global_mut::<WasmHost>().requests.take()
+    }
+
+    /// コマンドを実行する。終わったら結果が返る。
+    pub fn run_command(
+        extension: &str,
+        command: &str,
+        cx: &App,
+    ) -> Option<futures::channel::oneshot::Receiver<Result<(), String>>> {
+        let ext = cx.try_global::<WasmHost>()?.running.get(extension)?;
+        Some(ext.run_command(command))
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
@@ -42,6 +86,18 @@ impl ExtensionStore {
         self.enabled().flat_map(|e| e.themes.iter())
     }
 
+    /// 有効な Extension が提供するコマンド。
+    pub fn commands(&self) -> Vec<ExtensionCommand> {
+        self.enabled()
+            .flat_map(|e| {
+                e.manifest.contributes.commands.iter().map(|c| ExtensionCommand {
+                    extension: e.manifest.id.clone(),
+                    command: c.clone(),
+                })
+            })
+            .collect()
+    }
+
     pub fn enabled(&self) -> impl Iterator<Item = &Arc<LoadedExtension>> {
         self.extensions
             .iter()
@@ -51,6 +107,14 @@ impl ExtensionStore {
 
 /// 段階1を始める。発見と読み込みはバックグラウンド、反映は UI スレッドで1回だけ行う。
 pub fn start(disabled: Vec<String>, cx: &mut App) {
+    let (context, requests) = HostContext::new();
+    cx.set_global(WasmHost {
+        context,
+        requests: Some(requests),
+        running: HashMap::new(),
+        failed: Vec::new(),
+        starting: 0,
+    });
     cx.set_global(ExtensionStore {
         stage: Stage::Loading,
         extensions: Vec::new(),
@@ -118,6 +182,11 @@ fn apply(
         loaded.len(),
         failed.len()
     );
+    let wasm: Vec<(crate::Manifest, Arc<[u8]>)> = loaded
+        .iter()
+        .filter(|e| !disabled.contains(&e.manifest.id))
+        .filter_map(|e| Some((e.manifest.clone(), e.wasm.clone()?)))
+        .collect();
     cx.set_global(ExtensionStore {
         stage: Stage::Ready,
         extensions: loaded.into_iter().map(Arc::new).collect(),
@@ -128,4 +197,35 @@ fn apply(
         languages_by_file_name: by_name,
         load_ms,
     });
+    start_wasm(wasm, cx);
+}
+
+/// 段階3: WASM の Extension をそれぞれのスレッドで起動する。
+fn start_wasm(list: Vec<(crate::Manifest, Arc<[u8]>)>, cx: &mut App) {
+    let Some(host) = cx.try_global::<WasmHost>().map(|h| h.context.clone()) else {
+        return;
+    };
+    for (manifest, wasm) in list {
+        let id = manifest.id.clone();
+        let (ext, ready) = runtime::spawn(manifest, wasm, host.clone());
+        cx.global_mut::<WasmHost>().starting += 1;
+        cx.spawn(async move |cx| {
+            let result = ready.await.unwrap_or_else(|_| Err("起動中に止まった".into()));
+            cx.update(|cx| {
+                let h = cx.global_mut::<WasmHost>();
+                h.starting -= 1;
+                match result {
+                    Ok(took) => {
+                        log::info!("Extension `{id}` を {}ms で起動した", took.as_millis());
+                        h.running.insert(id, Arc::new(ext));
+                    }
+                    Err(e) => {
+                        log::error!("Extension `{id}` を起動できなかった: {e}");
+                        h.failed.push((id, e));
+                    }
+                }
+            });
+        })
+        .detach();
+    }
 }

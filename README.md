@@ -20,7 +20,8 @@ Core は小さく速く保ち、機能はすべて Extension で足します。
 | `crates/terminal` | ターミナル（alacritty_terminal、テーマの ANSI 色） |
 | `crates/settings` | 設定（既定 / ユーザー / フォルダの3層、コメント付き JSON） |
 | `crates/lsp` | LSP クライアント（JSON-RPC、専用スレッドで読み書き） |
-| `crates/extension_host` | Extension の読み込みと検証、起動後の段階的な反映 |
+| `crates/extension_host` | Extension の読み込みと検証、起動後の段階的な反映、WASM の実行（wasmtime） |
+| `crates/extension_api` | Extension 作者向けの SDK と WIT（`nucleus:extension@1.0.0`） |
 | `crates/workspace` | メインウィンドウ（TitleBar / DockArea / StatusBar）、パネル、コマンドパレット、ファイル検索、セッション |
 
 ## ビルドと実行
@@ -53,6 +54,7 @@ cargo run -p nucleus -- path/to/project
 | `Ctrl+`` ` `` / `Ctrl+Shift+T` | ターミナルの表示切り替え / 新しいターミナル |
 | `Ctrl+Shift+V`（ターミナル内） | 貼り付け |
 | `F12` | 定義へ移動 |
+| `Ctrl+Alt+S` | 行を並べ替える（組み込み Extension「Word Tools」） |
 | `Ctrl+B` / `Ctrl+J` / `Ctrl+Alt+B` | 左 / 下 / 右のドックを開閉 |
 | `Ctrl+Q` | 終了 |
 
@@ -82,3 +84,17 @@ cargo clippy --workspace --all-targets
 ## ライセンス
 
 MIT または Apache-2.0。同梱フォントのライセンスは `assets/fonts/` を参照してください。
+
+## Extension を作る
+
+Extension は `extension.yaml`（名前・権限・提供するもの）と、必要なら WASM 1つでできています。WASM を持つ Extension は Rust で書けます（例: `extensions-src/word-tools`）。
+
+```bash
+rustup target add wasm32-wasip2
+```
+
+```bash
+./extensions-src/word-tools/build.sh
+```
+
+できたフォルダを `~/.local/share/nucleus/extensions/<名前>/` に置くと、次の起動で読み込まれます。権限と API の詳細は `docs/ARCHITECTURE.md` を参照してください。

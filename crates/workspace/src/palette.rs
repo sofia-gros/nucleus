@@ -173,7 +173,7 @@ impl Workspace {
         palette.query = query.clone();
         match palette.kind {
             PaletteKind::Commands => {
-                let titles: Vec<String> = commands::all().iter().map(|c| cx.t(c.title_key).to_string()).collect();
+                let titles: Vec<String> = commands::all(cx).iter().map(|c| c.title.to_string()).collect();
                 palette.matches = if query.trim().is_empty() {
                     (0..titles.len()).collect()
                 } else {
@@ -239,13 +239,13 @@ impl Workspace {
         let ws = cx.entity().downgrade();
         let items: Vec<CommandItem> = match p.kind {
             PaletteKind::Commands => {
-                let all = commands::all();
+                let all = commands::all(cx);
                 p.matches
                     .iter()
                     .filter_map(|&i| all.get(i))
                     .map(|c| {
                         CommandItem::new()
-                            .label(cx.t(c.title_key))
+                            .label(c.title.clone())
                             .icon(Icon::new(c.icon).text_color(cx.token(Token::MutedForeground)))
                             .action((c.action)())
                     })

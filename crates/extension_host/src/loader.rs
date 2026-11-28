@@ -64,6 +64,8 @@ pub struct LoadedExtension {
     pub dir: Option<PathBuf>,
     pub themes: Vec<theme::ThemeFile>,
     pub messages: Vec<i18n::Messages>,
+    /// `main` の WASM（Component）。段階3で起動する。
+    pub wasm: Option<std::sync::Arc<[u8]>>,
     /// 読み込めなかった部分（Extension 自体は有効なまま）。
     pub warnings: Vec<String>,
 }
@@ -174,6 +176,14 @@ pub fn load(source: Source) -> Result<LoadedExtension, Vec<String>> {
         }
     }
 
+    let mut wasm = None;
+    if let Some(main) = &manifest.main {
+        match source.read(main) {
+            Ok(b) => wasm = Some(std::sync::Arc::from(b.into_owned())),
+            Err(e) => warnings.push(e),
+        }
+    }
+
     let (builtin, dir) = match source {
         Source::Builtin(_) => (true, None),
         Source::Dir(d) => (false, Some(d)),
@@ -184,6 +194,7 @@ pub fn load(source: Source) -> Result<LoadedExtension, Vec<String>> {
         dir,
         themes,
         messages,
+        wasm,
         warnings,
     })
 }

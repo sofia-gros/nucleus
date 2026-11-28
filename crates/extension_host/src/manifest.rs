@@ -238,6 +238,21 @@ impl Manifest {
             }
             _ => {}
         }
+        if self.main.is_some() && self.api.core.is_none() {
+            errors.push("main（WASM）を使うときは api.core を書く".into());
+        }
+        if !self.contributes.commands.is_empty() && self.main.is_none() {
+            errors.push("contributes.commands を実行するには main（WASM）が必要".into());
+        }
+        for c in &self.contributes.commands {
+            if !c.id.starts_with(&format!("{}.", self.id.split_once('.').map_or("", |(_, n)| n))) {
+                errors.push(format!(
+                    "コマンド `{}` は `{}.` で始める",
+                    c.id,
+                    self.id.split_once('.').map_or("", |(_, n)| n)
+                ));
+            }
+        }
         if self.uses_ui() && self.api.ui.is_none() {
             errors.push("ui 権限を使うときは api.ui を書く".into());
         }

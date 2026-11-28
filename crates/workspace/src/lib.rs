@@ -3,6 +3,7 @@
 mod assets;
 mod close;
 mod commands;
+mod extension_bridge;
 mod finder;
 mod language_support;
 mod palette;
@@ -145,6 +146,8 @@ pub struct Workspace {
     /// 未保存の確認に答えた後は、ウィンドウを閉じる要求をそのまま通す。
     close_confirmed: bool,
     extension_errors_shown: bool,
+    /// 登録済みの Extension のショートカット（Extension ID, コマンド ID）。
+    extension_keys: HashSet<(String, String)>,
     terminals: Vec<WeakEntity<terminal::TerminalView>>,
     /// 開いているファイル（タブを開いた順。セッションの保存用）。
     open_order: Vec<PathBuf>,
@@ -239,6 +242,7 @@ impl Workspace {
         ));
         let focus = cx.focus_handle();
         focus.focus(window, cx);
+        cx.defer_in(window, |this: &mut Workspace, window, cx| this.start_extension_bridge(window, cx));
         let this = cx.entity().downgrade();
         window.on_window_should_close(cx, move |window, cx| {
             this.update(cx, |ws, cx| ws.should_close_window(window, cx))
@@ -255,6 +259,7 @@ impl Workspace {
             indexing: false,
             close_confirmed: false,
             extension_errors_shown: false,
+            extension_keys: HashSet::new(),
             terminals: first_terminal.into_iter().collect(),
             open_order: Vec::new(),
             loading: HashSet::new(),
@@ -451,6 +456,7 @@ impl Workspace {
         };
         if store.stage == extension_host::Stage::Ready && !self.extension_errors_shown {
             self.extension_errors_shown = true;
+            extension_bridge::bind_keys(&mut self.extension_keys, cx);
             // Extension の読み込みより先に開いていたファイルも、言語サーバーにつなぐ。
             let open: Vec<_> = self.editors.values().filter_map(WeakEntity::upgrade).collect();
             for e in open {
@@ -687,6 +693,7 @@ fn language_label(name: &str) -> String {
 
 impl Render for Workspace {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_extension_root(cx);
         v_flex()
             .key_context(CONTEXT)
             .track_focus(&self.focus)
@@ -726,6 +733,9 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| this.open_user_settings(window, cx)))
             .on_action(cx.listener(|this, _: &NewTerminal, window, cx| this.new_terminal(window, cx)))
             .on_action(cx.listener(|this, _: &ToggleTerminal, window, cx| this.toggle_terminal(window, cx)))
+            .on_action(cx.listener(|this, a: &extension_bridge::RunExtensionCommand, window, cx| {
+                this.run_extension_command(a, window, cx)
+            }))
             .on_action(
                 cx.listener(|this, _: &OpenWorkspaceSettings, window, cx| this.open_workspace_settings(window, cx)),
             )

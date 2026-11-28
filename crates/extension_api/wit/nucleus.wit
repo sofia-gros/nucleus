@@ -1,0 +1,57 @@
+// Nucleus Extension API — core@1（docs/ARCHITECTURE.md §4.3）。
+// 追加だけ行い、壊す変更はメジャー版でだけ行う。UI の API（ui@N）は別の interface で版を上げる。
+package nucleus:extension@1.0.0;
+
+/// Host（Nucleus）が Extension に提供する関数。呼ぶには extension.yaml で権限を宣言する。
+interface host {
+    enum log-level { debug, info, warn, error }
+
+    /// ログに書く（権限不要）。
+    log: func(level: log-level, message: string);
+
+    enum notification-level { info, warning, error }
+
+    /// 画面に通知を出す（権限不要）。
+    notify: func(level: notification-level, message: string);
+
+    /// 開いているフォルダ（権限不要）。
+    workspace-root: func() -> option<string>;
+
+    /// ワークスペース内のファイルを読む（`workspace: [fs.read]`）。パスはワークスペースからの相対。
+    read-file: func(path: string) -> result<string, string>;
+
+    /// ワークスペース内のファイルに書く（`workspace: [fs.write]`）。
+    write-file: func(path: string, contents: string) -> result<_, string>;
+
+    record document {
+        /// ワークスペースからの相対パス（外のファイルなら絶対パス）。
+        path: string,
+        language: string,
+        text: string,
+    }
+
+    /// アクティブなエディタの内容（`editor: [read]`）。
+    active-document: func() -> option<document>;
+
+    /// アクティブなエディタの内容を置き換える（`editor: [edit]`）。元に戻す（Undo）ことができる。
+    replace-active-text: func(text: string) -> result<_, string>;
+
+    record process-output {
+        status: s32,
+        stdout: string,
+        stderr: string,
+    }
+
+    /// 外部コマンドを実行する（`process: [コマンド名]` に挙げたものだけ）。作業ディレクトリはワークスペース。
+    run-process: func(command: string, args: list<string>) -> result<process-output, string>;
+}
+
+world extension {
+    import host;
+
+    /// 読み込み後に一度だけ呼ばれる。
+    export activate: func() -> result<_, string>;
+
+    /// `contributes.commands` で宣言したコマンドが実行されたときに呼ばれる。
+    export run-command: func(id: string) -> result<_, string>;
+}

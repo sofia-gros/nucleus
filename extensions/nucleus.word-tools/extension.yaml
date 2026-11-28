@@ -1,0 +1,14 @@
+# WASM を持つ組み込み Extension の例（ソースは extensions-src/word-tools）。
+id: nucleus.word-tools
+name: Word Tools
+version: 1.0.0
+publisher: nucleus
+description: Count words and sort lines in the active file.
+api: { core: 1 }
+permissions:
+  editor: [read, edit]
+contributes:
+  commands:
+    - { id: word-tools.count, title: "Word Tools: Count Words" }
+    - { id: word-tools.sort-lines, title: "Word Tools: Sort Lines", key: "ctrl-alt-s" }
+main: word_tools.wasm

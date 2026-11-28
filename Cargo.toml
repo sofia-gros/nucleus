@@ -39,6 +39,8 @@ settings = { path = "crates/settings" }
 terminal = { path = "crates/terminal" }
 extension_host = { path = "crates/extension_host" }
 lsp = { path = "crates/lsp" }
+wasmtime = { version = "51", default-features = false, features = ["component-model", "cranelift", "runtime", "std", "parallel-compilation", "cache", "addr2line"] }
+wasmtime-wasi = "51"
 lsp-types = { version = "0.97.0", features = ["proposed"] }
 
 [workspace.lints.clippy]

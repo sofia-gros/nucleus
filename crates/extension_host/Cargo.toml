@@ -16,6 +16,9 @@ dirs.workspace = true
 theme.workspace = true
 i18n.workspace = true
 rust-embed = "8"
+wasmtime.workspace = true
+wasmtime-wasi.workspace = true
+futures.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
