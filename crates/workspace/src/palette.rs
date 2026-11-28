@@ -352,6 +352,9 @@ impl Workspace {
             .placeholder(placeholder)
             .max_h(px(420.))
             .bordered(false)
+            // 外枠は角丸だが、gpui の切り抜き（overflow_hidden）は四角なので、中の背景も同じ丸さにする
+            // （外枠の 8px から枠線の 1px を引いた 7px）。そうしないと角に四角い背景がはみ出る。
+            .rounded(px(7.))
             .empty(move |_, _, cx| {
                 div()
                     .py_6()
@@ -369,7 +372,11 @@ impl Workspace {
                     .ok();
             })
             .on_cancel(move |window, cx| {
-                ws3.update(cx, |ws, cx| ws.close_palette(window, cx)).ok();
+                // Command の更新の途中で呼ばれるので、閉じる（Command の状態を読む）のは終わってから。
+                let ws = ws3.clone();
+                window.defer(cx, move |window, cx| {
+                    ws.update(cx, |ws, cx| ws.close_palette(window, cx)).ok();
+                });
             });
 
         Some(
