@@ -21,6 +21,7 @@ Core は小さく速く保ち、機能はすべて Extension で足します。
 | `crates/settings` | 設定（既定 / ユーザー / フォルダの3層、コメント付き JSON） |
 | `crates/lsp` | LSP クライアント（JSON-RPC、専用スレッドで読み書き） |
 | `crates/extension_host` | Extension の読み込みと検証、起動後の段階的な反映、WASM の実行（wasmtime） |
+| `crates/nucleus-ext` | Extension の検証・配布物の作成・公開リポジトリの一覧の作成（CLI） |
 | `crates/extension_api` | Extension 作者向けの SDK と WIT（`nucleus:extension@1.0.0`） |
 | `crates/workspace` | メインウィンドウ（TitleBar / DockArea / StatusBar）、パネル、コマンドパレット、ファイル検索、セッション |
 
@@ -47,6 +48,7 @@ cargo run -p nucleus -- path/to/project
 | `Ctrl+Shift+P` / `F1` | コマンドパレット |
 | `Ctrl+P` | ファイルへ移動 |
 | `Ctrl+Shift+F` | プロジェクト全体を検索・置換 |
+| `Ctrl+Shift+X` | 拡張機能（インストール済み・探す） |
 | `Ctrl+O` | フォルダを開く |
 | `Ctrl+S` | 保存 |
 | `Ctrl+W` | タブを閉じる |
@@ -100,3 +102,7 @@ rustup target add wasm32-wasip2
 ```
 
 できたフォルダを `~/.local/share/nucleus/extensions/<名前>/` に置くと、次の起動で読み込まれます。権限と API の詳細は `docs/ARCHITECTURE.md` を参照してください。
+
+## Extension を公開する
+
+公開リポジトリは [sofia-gros/nucleus-extensions](https://github.com/sofia-gros/nucleus-extensions) です。`nucleus-ext pack <フォルダ>` で配布物を作り、`extensions/<id>.yaml` を足す PR を出します（手順はそのリポジトリの README）。マージされると、Nucleus の拡張機能の画面（`Ctrl+Shift+X` → 探す）に出ます。

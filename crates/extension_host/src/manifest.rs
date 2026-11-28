@@ -9,7 +9,7 @@ use theme::ExtTokenDecl;
 pub const CORE_API: u32 = 1;
 pub const UI_API: u32 = 1;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
     /// `<publisher>.<name>`（小文字・数字・`-`）。

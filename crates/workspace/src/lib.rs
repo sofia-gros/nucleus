@@ -6,6 +6,7 @@ mod commands;
 mod diff_views;
 mod extension_bridge;
 mod extension_view;
+mod extensions_page;
 mod finder;
 mod language_support;
 mod palette;
@@ -39,7 +40,9 @@ use gpui_kit::{
         status_bar::StatusBar,
         v_flex,
     },
-    div, px, size,
+    div,
+    prelude::FluentBuilder as _,
+    px, size,
 };
 use i18n::Translate as _;
 use theme::{Token, TokenColors as _};
@@ -70,6 +73,7 @@ actions!(
         NewTerminal,
         ToggleTerminal,
         ProjectSearch,
+        OpenExtensions,
     ]
 );
 
@@ -88,6 +92,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("f1", CommandPalette, Some(CONTEXT)),
         KeyBinding::new("ctrl-p", FindFile, Some(CONTEXT)),
         KeyBinding::new("ctrl-shift-f", ProjectSearch, Some(CONTEXT)),
+        KeyBinding::new("ctrl-shift-x", OpenExtensions, Some(CONTEXT)),
         KeyBinding::new("ctrl-w", CloseActiveEditor, Some(CONTEXT)),
         KeyBinding::new("ctrl-s", SaveActiveEditor, Some(CONTEXT)),
         KeyBinding::new("ctrl-,", OpenSettings, Some(CONTEXT)),
@@ -154,9 +159,15 @@ pub struct Workspace {
     extension_errors_shown: bool,
     /// 登録済みの Extension のショートカット（Extension ID, コマンド ID）。
     extension_keys: HashSet<(String, String)>,
+    /// 置いた Extension のビュー（`<extension>/<view>`、エディタの横なら `@<番号>` つき）。
+    ext_views_added: HashSet<String>,
+    /// 右ドックに置いた Extension のビュー（並べ直すときに使う）。
+    right_ext_panels: Vec<std::sync::Arc<dyn gpui_kit::base::dock::PanelView>>,
     /// エディタの横のビューをつないだエディタ（番号 → エディタ）。
     editor_slots: HashMap<u32, WeakEntity<EditorPanel>>,
     next_editor_slot: u32,
+    /// Extension の管理画面（開いていれば）。
+    extensions_page: Option<WeakEntity<extensions_page::ExtensionsPage>>,
     /// 開いている Diff のタブ。
     diff_views: diff_views::DiffViews,
     /// ドックに置いた Extension のビュー。
@@ -290,6 +301,9 @@ impl Workspace {
             extension_keys: HashSet::new(),
             extension_panels: Vec::new(),
             diff_views: Vec::new(),
+            extensions_page: None,
+            ext_views_added: HashSet::new(),
+            right_ext_panels: Vec::new(),
             editor_slots: HashMap::new(),
             next_editor_slot: 1,
             outline_panel: outline_handle,
@@ -501,15 +515,20 @@ impl Workspace {
         let Some(store) = extension_host::ExtensionStore::get(cx) else {
             return;
         };
-        if store.stage == extension_host::Stage::Ready && !self.extension_errors_shown {
-            self.extension_errors_shown = true;
+        if store.stage == extension_host::Stage::Ready {
+            // あとから入れた Extension の分も足す（どれも、置いたものは置き直さない）。
             extension_bridge::bind_keys(&mut self.extension_keys, cx);
             self.add_extension_views(window, cx);
-            // Extension の読み込みより先に開いていたエディタにも、横のビューを付ける。
             let open: Vec<_> = self.editors.values().filter_map(WeakEntity::upgrade).collect();
             for e in &open {
                 self.attach_editor_views(e, window, cx);
             }
+        }
+        let Some(store) = extension_host::ExtensionStore::get(cx) else {
+            return;
+        };
+        if store.stage == extension_host::Stage::Ready && !self.extension_errors_shown {
+            self.extension_errors_shown = true;
             // Extension の読み込みより先に開いていたファイルも、言語サーバーにつなぐ。
             let open: Vec<_> = self.editors.values().filter_map(WeakEntity::upgrade).collect();
             for e in open {
@@ -615,7 +634,15 @@ impl Workspace {
                                 .text_color(cx.token(Token::PrimaryBackground)),
                         ),
                     )
-                    .children(menus.map(|m| Button::new(m).ghost().small().label(cx.t(&format!("core.menu.{m}"))))),
+                    .children(menus.map(|m| {
+                        Button::new(m)
+                            .ghost()
+                            .small()
+                            .label(cx.t(&format!("core.menu.{m}")))
+                            .when(m == "extensions", |b| {
+                                b.on_click(cx.listener(|this, _, window, cx| this.open_extensions(window, cx)))
+                            })
+                    })),
             )
             .child(
                 div()
@@ -787,6 +814,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &NewTerminal, window, cx| this.new_terminal(window, cx)))
             .on_action(cx.listener(|this, _: &ToggleTerminal, window, cx| this.toggle_terminal(window, cx)))
             .on_action(cx.listener(|this, _: &ProjectSearch, window, cx| this.open_project_search(window, cx)))
+            .on_action(cx.listener(|this, _: &OpenExtensions, window, cx| this.open_extensions(window, cx)))
             .on_action(
                 cx.listener(|this, a: &extension_bridge::RunExtensionCommand, window, cx| {
                     this.run_extension_command(a, window, cx)

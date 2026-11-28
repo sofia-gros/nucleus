@@ -3,7 +3,7 @@
 
 use std::{collections::HashMap, sync::Arc, time::Instant};
 
-use gpui_kit::{App, AppContext as _, Global};
+use gpui_kit::{App, AppContext as _, BorrowAppContext as _, Global};
 use theme::ExtTokenSet;
 
 use crate::{
@@ -241,6 +241,56 @@ fn apply(
         load_ms,
     });
     start_wasm(wasm, cx);
+}
+
+/// 入れたばかりの Extension をすぐに使えるようにする（その Extension だけ段階1と段階3を行う）。
+/// 同じ ID のものがあれば置き換える（動いている WASM は止めて起動し直す）。
+pub fn add_installed(dir: std::path::PathBuf, cx: &mut App) -> Result<(), String> {
+    let e = loader::load(loader::Source::Dir(dir)).map_err(|e| e.join(" / "))?;
+    let id = e.manifest.id.clone();
+    for w in &e.warnings {
+        log::warn!("Extension `{id}`: {w}");
+    }
+    for m in &e.messages {
+        if let Err(errs) = i18n::add_messages(m.clone(), cx) {
+            for err in errs {
+                log::warn!("Extension `{id}`: {err}");
+            }
+        }
+    }
+    let wasm = e.wasm.clone().map(|w| (e.manifest.clone(), w));
+    if !cx.has_global::<ExtensionStore>() {
+        return Err("Extension の読み込みが始まっていない".into());
+    }
+    cx.update_global::<ExtensionStore, _>(|store, _| {
+        for (key, decl) in &e.manifest.tokens {
+            if let Err(err) = store.tokens.declare(&id, key, decl.clone()) {
+                log::warn!("Extension `{id}`: {err}");
+            }
+        }
+        for l in &e.manifest.contributes.languages {
+            for x in &l.extensions {
+                store.languages_by_extension.insert(x.to_lowercase(), l.name.clone());
+            }
+            for f in &l.file_names {
+                store.languages_by_file_name.insert(f.clone(), l.name.clone());
+            }
+        }
+        store.disabled.retain(|d| *d != id);
+        store.extensions.retain(|x| x.manifest.id != id);
+        store.extensions.push(Arc::new(e));
+    });
+    if cx.has_global::<WasmHost>() {
+        cx.update_global::<WasmHost, _>(|h, _| {
+            h.running.remove(&id);
+            h.failed.retain(|(f, _)| *f != id);
+        });
+    }
+    if let Some(w) = wasm {
+        start_wasm(vec![w], cx);
+    }
+    log::info!("Extension `{id}` を入れた");
+    Ok(())
 }
 
 /// 段階3: WASM の Extension をそれぞれのスレッドで起動する。

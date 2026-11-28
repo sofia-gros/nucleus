@@ -19,6 +19,10 @@ rust-embed = "8"
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true
 futures.workspace = true
+ureq.workspace = true
+sha2.workspace = true
+tar.workspace = true
+flate2.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

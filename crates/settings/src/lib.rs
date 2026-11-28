@@ -39,6 +39,8 @@ pub struct Settings {
     pub keymap: Vec<KeymapEntry>,
     /// 無効にする Extension の ID。
     pub disabled_extensions: Vec<String>,
+    /// Extension の一覧（index.json）の場所。null なら公式（sofia-gros/nucleus-extensions）。
+    pub extensions_registry: Option<String>,
 }
 
 impl Default for Settings {
@@ -50,6 +52,7 @@ impl Default for Settings {
             editor: EditorSettings::default(),
             keymap: Vec::new(),
             disabled_extensions: Vec::new(),
+            extensions_registry: None,
         }
     }
 }

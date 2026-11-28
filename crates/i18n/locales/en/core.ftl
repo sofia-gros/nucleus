@@ -187,3 +187,32 @@ core-diff-hunks = { $count ->
     }
 core-diff-stage-hunk = Stage Hunk
 core-diff-revert-hunk = Revert Hunk
+
+# Extensions
+core-command-open-extensions = Extensions: Manage Extensions
+core-extensions-title = Extensions
+core-extensions-tab-installed = Installed
+core-extensions-tab-browse = Browse
+core-extensions-search = Search extensions
+core-extensions-builtin = Built-in
+core-extensions-installed = Installed
+core-extensions-disabled = Disabled
+core-extensions-restart-required = Restart to apply
+core-extensions-enable = Enable
+core-extensions-disable = Disable
+core-extensions-install = Install
+core-extensions-installing = Installing…
+core-extensions-update = Update to { $version }
+core-extensions-uninstall = Uninstall
+core-extensions-loading = Loading the extension list…
+core-extensions-load-failed = Could not load the extension list: { $error }
+core-extensions-retry = Reload
+core-extensions-empty = No extensions found.
+core-extensions-confirm-install = Install { $name } { $version }?
+core-extensions-permissions = This extension asks for:
+core-extensions-no-permissions = • No permissions
+core-extensions-strong-note = ⚠ marks strong permissions (editing files, running programs, network).
+core-extensions-installed-notify = { $name } was installed.
+core-extensions-install-failed = Could not install { $name }: { $error }
+core-extensions-confirm-uninstall = Uninstall { $name }? It is removed when Nucleus restarts.
+core-extensions-uninstalled-notify = { $name } was uninstalled. Restart Nucleus to finish.

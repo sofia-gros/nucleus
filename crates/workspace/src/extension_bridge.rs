@@ -207,6 +207,10 @@ impl Workspace {
         };
         let mut right = Vec::new();
         for v in store.views() {
+            // 置いたものは置き直さない（あとから入れた Extension の分だけ足す）。
+            if !self.ext_views_added.insert(format!("{}/{}", v.extension, v.view.id)) {
+                continue;
+            }
             let placement = match v.view.location {
                 ViewLocation::Left => DockPlacement::Left,
                 ViewLocation::Right => DockPlacement::Right,
@@ -227,11 +231,17 @@ impl Workspace {
         if right.is_empty() {
             return;
         }
-        let outline = self.outline_panel.clone();
+        self.right_ext_panels.extend(right);
+        let all: Vec<_> = self
+            .right_ext_panels
+            .iter()
+            .cloned()
+            .chain(self.outline_panel.clone())
+            .collect();
         self.dock_area.update(cx, |area, cx| {
             let open = area.is_dock_open(DockPlacement::Right);
             let mut layout = DockLayout::tabs();
-            for h in right.into_iter().chain(outline) {
+            for h in all {
                 layout = layout.panel_view(h, cx);
             }
             area.set_dock(DockPlacement::Right, layout, window, cx);
@@ -256,9 +266,6 @@ impl Workspace {
         if store.stage != extension_host::Stage::Ready {
             return;
         }
-        if self.editor_slots.values().any(|w| w.entity_id() == editor.entity_id()) {
-            return;
-        }
         let views: Vec<_> = store
             .views()
             .into_iter()
@@ -267,9 +274,24 @@ impl Workspace {
         if views.is_empty() {
             return;
         }
-        let id = self.next_editor_slot;
-        self.next_editor_slot += 1;
+        let existing = self
+            .editor_slots
+            .iter()
+            .find(|(_, w)| w.entity_id() == editor.entity_id())
+            .map(|(id, _)| *id);
+        let id = existing.unwrap_or_else(|| {
+            let id = self.next_editor_slot;
+            self.next_editor_slot += 1;
+            id
+        });
         self.editor_slots.insert(id, editor.downgrade());
+        let views: Vec<_> = views
+            .into_iter()
+            .filter(|v| {
+                self.ext_views_added
+                    .insert(format!("{}/{}@{id}", v.extension, v.view.id))
+            })
+            .collect();
         let (state, version) = {
             let e = editor.read(cx);
             (e.state().clone(), e.edit_version())
@@ -293,6 +315,28 @@ impl Workspace {
         let root = self.project.read(cx).root();
         let rel = root.as_deref().and_then(|r| path.strip_prefix(r).ok()).unwrap_or(path);
         WasmHost::broadcast(WorkspaceEvent::FileSaved(rel.display().to_string()), cx);
+    }
+
+    /// Extension の管理画面を開く（開いていればそのタブを選ぶ）。
+    pub(crate) fn open_extensions(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(page) = self.extensions_page.as_ref().and_then(WeakEntity::upgrade) {
+            let id = gpui_kit::component::dock::PanelId::from(page.entity_id());
+            if self.dock_area.read(cx).panel(id).is_some() {
+                self.dock_area.update(cx, |a, cx| a.select_panel(id, window, cx));
+                return;
+            }
+        }
+        let page = cx.new(|cx| crate::extensions_page::ExtensionsPage::new(window, cx));
+        self._subscriptions
+            .push(cx.subscribe_in(&page, window, |this, _, e, window, cx| match e {
+                crate::extensions_page::ExtensionsPageEvent::SetDisabled(list) => {
+                    this.choose_setting("disabled_extensions", serde_json::json!(list), window, cx)
+                }
+            }));
+        self.extensions_page = Some(page.downgrade());
+        self.dock_area.update(cx, |a, cx| {
+            a.add_panel_view(panel_handle(page), DockPlacement::Center, None, window, cx)
+        });
     }
 
     pub(crate) fn run_extension_command(

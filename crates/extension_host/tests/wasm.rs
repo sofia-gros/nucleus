@@ -166,8 +166,8 @@ fn fake_ui_any(rx: futures::channel::mpsc::UnboundedReceiver<UiRequest>) -> std:
     })
 }
 
-const MINIMAP_WASM: &[u8] = include_bytes!("../../../extensions/nucleus.minimap/minimap.wasm");
-const MINIMAP_MANIFEST: &str = include_str!("../../../extensions/nucleus.minimap/extension.yaml");
+const MINIMAP_WASM: &[u8] = include_bytes!("../../../extensions-src/minimap/package/minimap.wasm");
+const MINIMAP_MANIFEST: &str = include_str!("../../../extensions-src/minimap/package/extension.yaml");
 
 /// MiniMap: エディタの内容から四角形を描き、クリックでエディタを動かす。
 #[test]

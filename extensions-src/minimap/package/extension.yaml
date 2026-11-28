@@ -1,4 +1,4 @@
-# 公式の MiniMap Extension（ソースは extensions-src/minimap）。エディタの右側にファイルの全体像を描く。
+# 公式の MiniMap Extension（ソースは extensions-src/minimap）。組み込みではなく sofia-gros/nucleus-extensions から配る。エディタの右側にファイルの全体像を描く。
 id: nucleus.minimap
 name: Minimap
 version: 1.0.0

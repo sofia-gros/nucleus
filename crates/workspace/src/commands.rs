@@ -7,9 +7,9 @@ use i18n::Translate as _;
 use crate::extension_bridge::{RunExtensionCommand, command_title};
 
 use crate::{
-    CloseActiveEditor, CommandPalette, FindFile, NewTerminal, OpenFolder, OpenSettings, OpenWorkspaceSettings,
-    ProjectSearch, Quit, SaveActiveEditor, SearchInActiveEditor, SelectLanguage, SelectTheme, ToggleBottomDock,
-    ToggleLeftDock, ToggleRightDock, ToggleTerminal, ToggleTheme,
+    CloseActiveEditor, CommandPalette, FindFile, NewTerminal, OpenExtensions, OpenFolder, OpenSettings,
+    OpenWorkspaceSettings, ProjectSearch, Quit, SaveActiveEditor, SearchInActiveEditor, SelectLanguage, SelectTheme,
+    ToggleBottomDock, ToggleLeftDock, ToggleRightDock, ToggleTerminal, ToggleTheme,
 };
 
 pub struct CommandDef {
@@ -35,6 +35,9 @@ pub fn all(cx: &App) -> Vec<CommandDef> {
         }),
         c("core.command.project-search", IconName::Search, || {
             Box::new(ProjectSearch)
+        }),
+        c("core.command.open-extensions", IconName::Puzzle, || {
+            Box::new(OpenExtensions)
         }),
         c("core.command.close-tab", IconName::X, || Box::new(CloseActiveEditor)),
         c("core.command.toggle-terminal", IconName::Terminal, || {
