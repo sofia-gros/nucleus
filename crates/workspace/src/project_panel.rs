@@ -12,7 +12,9 @@ use gpui_kit::{
         Icon, Sizable as _,
         button::{Button, ButtonVariants as _},
         dock::{BasePanel, Panel, PanelEvent},
-        h_flex, v_flex,
+        h_flex,
+        menu::ContextMenuExt as _,
+        v_flex,
     },
     div,
     prelude::FluentBuilder as _,
@@ -25,6 +27,12 @@ use theme::{Token, TokenColors as _};
 pub enum ProjectPanelEvent {
     OpenFile(PathBuf),
     OpenFolderRequested,
+    /// 名前を変えた（前, 後）。
+    Renamed(PathBuf, PathBuf),
+    /// ごみ箱に移した。
+    Deleted(PathBuf),
+    /// このフォルダでターミナルを開く。
+    OpenTerminal(PathBuf),
 }
 
 pub struct ProjectPanel {
@@ -89,6 +97,13 @@ impl ProjectPanel {
         }
         self.load(to_load, cx);
         cx.notify();
+    }
+
+    /// フォルダを読み直す（右クリックの操作の後。ファイルの監視より早く見せるため）。
+    pub(crate) fn refresh_dir(&mut self, dir: &std::path::Path, cx: &mut Context<Self>) {
+        if self.tree.as_mut().is_some_and(|t| t.invalidate(dir)) {
+            self.load(dir.to_path_buf(), cx);
+        }
     }
 
     /// フォルダの直下をバックグラウンドで読み、結果を反映する。
@@ -197,6 +212,10 @@ impl ProjectPanel {
                 )
             })
             .on_click(cx.listener(move |this, _, _, cx| this.click(ix, cx)))
+            .context_menu({
+                let (path, focus) = (row.path.clone(), self.focus.clone());
+                move |m, _, cx| crate::project_actions::menu(m.action_context(focus.clone()), &path, is_dir, cx)
+            })
             .into_any_element()
     }
 
@@ -295,6 +314,9 @@ impl Render for ProjectPanel {
         };
         div()
             .track_focus(&self.focus)
+            .on_action(cx.listener(|this, a: &crate::project_actions::TreeAction, window, cx| {
+                this.tree_action(a, window, cx)
+            }))
             .size_full()
             .bg(cx.token(Token::SidebarBackground))
             .child(body)

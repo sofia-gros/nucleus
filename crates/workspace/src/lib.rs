@@ -13,6 +13,7 @@ mod menus;
 mod palette;
 mod panels;
 mod problems;
+mod project_actions;
 mod project_panel;
 mod project_search;
 mod prompt;
@@ -260,6 +261,9 @@ impl Workspace {
             cx.subscribe_in(&project, window, |this, _, event, window, cx| match event {
                 ProjectPanelEvent::OpenFile(path) => this.open_file(path.clone(), window, cx),
                 ProjectPanelEvent::OpenFolderRequested => this.prompt_open_folder(window, cx),
+                ProjectPanelEvent::OpenTerminal(dir) => this.new_terminal_in(Some(dir.clone()), window, cx),
+                ProjectPanelEvent::Renamed(old, new) => this.file_moved(old, Some(new), window, cx),
+                ProjectPanelEvent::Deleted(old) => this.file_moved(old, None, window, cx),
             }),
         ];
         let mut subs = subs;
@@ -562,6 +566,30 @@ impl Workspace {
 
     fn new_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let cwd = self.project.read(cx).root();
+        self.new_terminal_in(cwd, window, cx);
+    }
+
+    /// 名前を変えた・消したファイル（フォルダならその中も）を開いていたら、エディタを付け替える・閉じる。
+    /// 未保存の変更があるものはそのまま残す（保存すると元の名前で書かれる）。
+    fn file_moved(&mut self, old: &Path, new: Option<&Path>, window: &mut Window, cx: &mut Context<Self>) {
+        let affected: Vec<(PathBuf, Entity<EditorPanel>)> = self
+            .editors
+            .iter()
+            .filter(|(p, _)| p.starts_with(old))
+            .filter_map(|(p, e)| Some((p.clone(), e.upgrade()?)))
+            .collect();
+        for (path, editor) in affected {
+            if editor.read(cx).is_dirty() {
+                continue;
+            }
+            self.remove_editor(editor, window, cx);
+            if let (Some(new), Ok(rest)) = (new, path.strip_prefix(old)) {
+                self.open_file(new.join(rest), window, cx);
+            }
+        }
+    }
+
+    fn new_terminal_in(&mut self, cwd: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
         let view = cx.new(|cx| terminal::TerminalView::new(cwd, cx));
         self.terminals.retain(|t| t.upgrade().is_some());
         self.terminals.push(view.downgrade());

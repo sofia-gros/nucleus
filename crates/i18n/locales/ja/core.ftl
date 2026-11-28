@@ -262,3 +262,17 @@ core-settings-item-check-extension-updates = 拡張機能の更新を確かめ�
 core-settings-item-check-extension-updates-description = 起動したときに、入れた拡張機能の新しい版があるか確かめます。
 core-settings-item-extensions-registry = 拡張機能の一覧の場所
 core-settings-item-extensions-registry-description = 拡張機能を探す index.json。空にすると公式の一覧を使います。
+
+# Project tree
+core-tree-new-file = 新しいファイル…
+core-tree-new-folder = 新しいフォルダ…
+core-tree-rename = 名前を変更…
+core-tree-delete = ごみ箱に移す
+core-tree-copy-path = パスをコピー
+core-tree-copy-relative-path = 相対パスをコピー
+core-tree-open-in-terminal = ターミナルで開く
+core-tree-ok = OK
+core-tree-exists = { $name } はもうあります。
+core-tree-invalid-name = / や \\ を含まない名前を入れてください。
+core-tree-confirm-delete = { $name } をごみ箱に移しますか？
+core-tree-delete-detail = ごみ箱から元に戻せます。

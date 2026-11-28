@@ -24,6 +24,7 @@ dirs.workspace = true
 futures.workspace = true
 nucleo-matcher.workspace = true
 ignore.workspace = true
+trash.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

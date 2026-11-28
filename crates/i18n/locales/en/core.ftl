@@ -297,3 +297,17 @@ core-settings-item-check-extension-updates = Check for Extension Updates
 core-settings-item-check-extension-updates-description = When Nucleus starts, look for newer versions of the extensions you installed.
 core-settings-item-extensions-registry = Extension Registry
 core-settings-item-extensions-registry-description = The index.json to browse extensions from. Leave empty for the official registry.
+
+# Project tree
+core-tree-new-file = New File…
+core-tree-new-folder = New Folder…
+core-tree-rename = Rename…
+core-tree-delete = Move to Trash
+core-tree-copy-path = Copy Path
+core-tree-copy-relative-path = Copy Relative Path
+core-tree-open-in-terminal = Open in Terminal
+core-tree-ok = OK
+core-tree-exists = { $name } already exists.
+core-tree-invalid-name = Enter a name without / or \\.
+core-tree-confirm-delete = Move { $name } to the trash?
+core-tree-delete-detail = You can restore it from the trash.
