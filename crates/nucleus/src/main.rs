@@ -3,6 +3,9 @@
 //! 最初のフレームは拡張を待たずに描く: テーマはキャッシュ（なければ同梱テーマ）、
 //! 文言は同梱の Core 文言で即座に有効にしてからウィンドウを開く。
 
+// Windows のリリース版では、黒いコンソール画面を一緒に出さない（開発版はログを見るために出す）。
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 use gpui_kit::App;
 
 fn main() {
