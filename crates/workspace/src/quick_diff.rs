@@ -3,7 +3,9 @@
 use std::path::Path;
 
 use editor::EditorPanel;
-use gpui_kit::{AppContext as _, Context, Entity, WeakEntity};
+use gpui_kit::{Context, Entity, WeakEntity};
+
+use remote::RemoteExt as _;
 
 use crate::Workspace;
 
@@ -31,19 +33,18 @@ impl Workspace {
         let Some(rel) = relative(&root, &path) else { return };
         let args: Vec<String> = q.args.iter().map(|a| a.replace("${path}", &rel)).collect();
         let weak = editor.downgrade();
-        let task = cx.background_spawn(async move {
-            let out = std::process::Command::new(&q.command)
-                .args(&args)
-                .current_dir(&root)
-                .env("GIT_TERMINAL_PROMPT", "0")
-                .stdin(std::process::Stdio::null())
-                .output()
-                .ok()?;
-            // 失敗（まだ追跡していないファイルなど）なら印は出さない。
-            out.status
-                .success()
-                .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+        let run = cx.remote().run_process(remote::ProcessSpec {
+            program: q.command.clone(),
+            args,
+            cwd: Some(remote::wire(&root)),
+            env: vec![("GIT_TERMINAL_PROMPT".into(), "0".into())],
+            stdin: None,
         });
+        let task = async move {
+            let out = run.await.ok()?;
+            // 失敗（まだ追跡していないファイルなど）なら印は出さない。
+            out.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+        };
         cx.spawn(async move |_, cx| {
             let base = task.await;
             weak.update(cx, |e, cx| e.set_diff_base(base, cx)).ok();

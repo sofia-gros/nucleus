@@ -5,7 +5,9 @@
 //! どちらも同じ符号化を通るので、動きは変わらない。
 
 pub mod fs;
+pub mod process;
 pub mod search;
+pub mod terminal;
 mod watcher;
 
 use std::{
@@ -27,11 +29,14 @@ pub use watcher::DirWatcher;
 /// すべての接続で共有するもの（共同開発では、ここにみんなが同じものを見る）。
 #[derive(Clone, Default)]
 pub struct Host {
-    _state: Arc<HostState>,
+    state: Arc<HostState>,
 }
 
 #[derive(Default)]
-struct HostState {}
+struct HostState {
+    /// ターミナルの番号（接続をまたいで重ならないように）。
+    next_terminal: std::sync::atomic::AtomicU64,
+}
 
 impl Host {
     pub fn new() -> Host {
@@ -41,8 +46,9 @@ impl Host {
     /// 新しい画面をつなぐ。`send` は画面へフレームを届ける。
     pub fn connect(&self, send: remote::Sender) -> Connection {
         Connection(Arc::new(ConnInner {
-            _host: self.clone(),
+            host: self.clone(),
             send,
+            terminals: Mutex::new(HashMap::new()),
             cancels: Mutex::new(HashMap::new()),
             watcher: Mutex::new(None),
             closed: AtomicBool::new(false),
@@ -55,8 +61,9 @@ impl Host {
 pub struct Connection(Arc<ConnInner>);
 
 struct ConnInner {
-    _host: Host,
+    host: Host,
     send: remote::Sender,
+    terminals: Mutex<HashMap<u64, terminal::HostTerminal>>,
     /// 打ち切れる頼みごと（検索など）。
     cancels: Mutex<HashMap<u64, Arc<AtomicBool>>>,
     watcher: Mutex<Option<DirWatcher>>,
@@ -82,6 +89,7 @@ impl Connection {
     pub fn close(&self) {
         self.0.closed.store(true, Ordering::SeqCst);
         self.0.watcher.lock().unwrap().take();
+        self.0.terminals.lock().unwrap().clear();
         for (_, flag) in self.0.cancels.lock().unwrap().drain() {
             flag.store(true, Ordering::Relaxed);
         }
@@ -113,6 +121,41 @@ impl Connection {
                     w.unwatch(Path::new(&dir));
                 }
                 return self.reply(id, Ok(Response::Done));
+            }
+            // ターミナルへの入力などは、届いた順に、その場で渡す。
+            Request::TerminalInput { id: t, bytes } => {
+                if let Some(term) = self.0.terminals.lock().unwrap().get(&t) {
+                    term.input(bytes);
+                }
+                return self.reply(id, Ok(Response::Done));
+            }
+            Request::TerminalResize { id: t, size } => {
+                if let Some(term) = self.0.terminals.lock().unwrap().get(&t) {
+                    term.resize(size);
+                }
+                return self.reply(id, Ok(Response::Done));
+            }
+            Request::TerminalScroll { id: t, lines } => {
+                if let Some(term) = self.0.terminals.lock().unwrap().get(&t) {
+                    term.scroll(lines);
+                }
+                return self.reply(id, Ok(Response::Done));
+            }
+            Request::TerminalClose { id: t } => {
+                self.0.terminals.lock().unwrap().remove(&t);
+                return self.reply(id, Ok(Response::Done));
+            }
+            Request::TerminalOpen(spec) => {
+                let t = self.0.host.state.next_terminal.fetch_add(1, Ordering::Relaxed) + 1;
+                let this = self.clone();
+                let result = terminal::HostTerminal::open(t, spec, move |e| this.event(e));
+                return match result {
+                    Ok(term) => {
+                        self.0.terminals.lock().unwrap().insert(t, term);
+                        self.reply(id, Ok(Response::Terminal(t)))
+                    }
+                    Err(e) => self.reply(id, Err(RemoteError::other(e.to_string()))),
+                };
             }
             _ => {}
         }
@@ -205,7 +248,14 @@ fn run(request: Request, cancel: &AtomicBool) -> Result<Response, RemoteError> {
             Err(e) if cancel.load(Ordering::Relaxed) => return Err(RemoteError::new(ErrorKind::Cancelled, e)),
             Err(e) => return Err(RemoteError::other(e)),
         },
-        Request::Watch { .. } | Request::Unwatch { .. } => Response::Done,
+        Request::RunProcess(spec) => Response::Output(process::run(spec)?),
+        Request::Watch { .. }
+        | Request::Unwatch { .. }
+        | Request::TerminalOpen(_)
+        | Request::TerminalInput { .. }
+        | Request::TerminalResize { .. }
+        | Request::TerminalScroll { .. }
+        | Request::TerminalClose { .. } => Response::Done,
     })
 }
 

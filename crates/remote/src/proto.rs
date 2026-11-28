@@ -84,6 +84,136 @@ pub enum Request {
         options: SearchOptions,
         limit: usize,
     },
+    /// プログラムを動かして、終わるのを待つ（git など）。端末の入力は求めない（`GIT_TERMINAL_PROMPT=0` など）。
+    RunProcess(ProcessSpec),
+    /// ターミナルを開く。返事は [`Response::Terminal`]。画面は [`Event::TerminalUpdate`] で届く。
+    TerminalOpen(TerminalSpec),
+    /// キー入力など（表示を最下部に戻してから送る）。
+    TerminalInput {
+        id: u64,
+        bytes: Vec<u8>,
+    },
+    TerminalResize {
+        id: u64,
+        size: TermSize,
+    },
+    /// 表示を上下に動かす（行数。上が正）。
+    TerminalScroll {
+        id: u64,
+        lines: i32,
+    },
+    TerminalClose {
+        id: u64,
+    },
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct TerminalSpec {
+    pub cwd: Option<String>,
+    /// null なら OS の既定のシェル。
+    pub shell: Option<String>,
+    pub args: Vec<String>,
+    pub scrollback: usize,
+    pub size: TermSize,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TermSize {
+    pub cols: u16,
+    pub lines: u16,
+    pub cell_width: u16,
+    pub cell_height: u16,
+}
+
+/// 画面の変わったところ。
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct TermUpdate {
+    pub id: u64,
+    pub cols: u16,
+    pub lines: u16,
+    /// 変わった行（行番号と、その行の文字。行末の空白は省く）。
+    pub rows: Vec<(u16, Vec<TermCell>)>,
+    pub cursor: Option<TermCursor>,
+    /// [`term_mode`] の組み合わせ。
+    pub mode: u32,
+}
+
+/// 端末のモード（[`TermUpdate::mode`]）。
+pub mod term_mode {
+    pub const APP_CURSOR: u32 = 1;
+    pub const BRACKETED_PASTE: u32 = 2;
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TermCell {
+    /// 文字（結合文字を含む）。
+    pub text: String,
+    pub fg: TermColor,
+    pub bg: TermColor,
+    /// [`cell_flags`] の組み合わせ。
+    pub flags: u16,
+}
+
+/// 文字の飾り（[`TermCell::flags`]）。
+pub mod cell_flags {
+    pub const BOLD: u16 = 1;
+    pub const ITALIC: u16 = 2;
+    pub const UNDERLINE: u16 = 4;
+    pub const UNDERCURL: u16 = 8;
+    pub const STRIKEOUT: u16 = 16;
+    pub const DIM: u16 = 32;
+    pub const INVERSE: u16 = 64;
+    pub const HIDDEN: u16 = 128;
+    /// 全角（2 マス）。
+    pub const WIDE: u16 = 256;
+}
+
+/// 端末の色。名前の色（前景・背景・0〜15 など）は画面側がテーマの色にする。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TermColor {
+    /// 0〜15 は ANSI の色。256 前景、257 背景、258 カーソル、259〜266 薄い 0〜7、267 明るい前景、268 薄い前景。
+    Named(u16),
+    Indexed(u8),
+    Rgb(u8, u8, u8),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TermCursor {
+    pub col: u16,
+    pub row: u16,
+    pub shape: CursorShape,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CursorShape {
+    Block,
+    Underline,
+    Beam,
+    HollowBlock,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ProcessSpec {
+    pub program: String,
+    pub args: Vec<String>,
+    pub cwd: Option<String>,
+    pub env: Vec<(String, String)>,
+    /// 標準入力に渡すもの（なければ空の入力）。
+    pub stdin: Option<Vec<u8>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProcessOutput {
+    /// 終了コード（シグナルで終わったときは None）。
+    pub code: Option<i32>,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+}
+
+impl ProcessOutput {
+    pub fn success(&self) -> bool {
+        self.code == Some(0)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -94,12 +224,30 @@ pub enum Response {
     Bool(bool),
     Paths(Vec<String>),
     Search(SearchResult),
+    Output(ProcessOutput),
+    Terminal(u64),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Event {
     /// 見張っているフォルダの中身が変わった。
     DirChanged(String),
+    TerminalUpdate(TermUpdate),
+    TerminalTitle {
+        id: u64,
+        title: Option<String>,
+    },
+    TerminalExited {
+        id: u64,
+    },
+    TerminalBell {
+        id: u64,
+    },
+    /// 端末の中のプログラムがクリップボードに書いた（OSC 52）。
+    TerminalClipboard {
+        id: u64,
+        text: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

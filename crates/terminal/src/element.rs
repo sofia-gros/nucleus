@@ -1,14 +1,11 @@
 //! 端末の画面を描く要素。大きさに合わせて行数・列数を決め、見えている行だけを描く。
 
-use alacritty_terminal::{
-    term::{TermMode, cell::Flags},
-    vte::ansi::{Color as AnsiColor, CursorShape, NamedColor},
-};
 use gpui_kit::{
     App, Bounds, Element, ElementId, Entity, FontStyle, FontWeight, GlobalElementId, Hsla, InspectorElementId,
     LayoutId, Pixels, ShapedLine, SharedString, Size, Style, TextAlign, TextRun, Window, fill, font, outline, point,
     px, relative, size,
 };
+use remote::{CursorShape, TermColor, cell_flags as F};
 use theme::{Token, TokenColors as _};
 
 use crate::model::{GridSize, Terminal};
@@ -45,38 +42,22 @@ pub struct Prepaint {
 }
 
 /// 端末の色をテーマの色に変える（0〜15 と既定色は Token、それ以外は計算）。
-fn color(c: AnsiColor, overrides: &alacritty_terminal::term::color::Colors, cx: &App) -> Hsla {
-    let named = |n: NamedColor| -> Hsla {
-        match n {
-            NamedColor::Foreground | NamedColor::BrightForeground => cx.token(Token::TerminalForeground),
-            NamedColor::Background => cx.token(Token::TerminalBackground),
-            NamedColor::Cursor => cx.token(Token::TerminalCursor),
-            NamedColor::DimForeground => {
-                let mut c = cx.token(Token::TerminalForeground);
-                c.a *= 0.7;
-                c
-            }
-            n if (n as usize) < 16 => theme::ansi_color(n as u8, cx),
-            dim => {
-                // Dim* は 0〜7 の色を薄くしたもの。
-                let base = (dim as usize).saturating_sub(NamedColor::DimBlack as usize) as u8;
-                let mut c = theme::ansi_color(base.min(7), cx);
-                c.a *= 0.7;
-                c
-            }
-        }
+/// 名前の色の番号は alacritty と同じ（256 前景、257 背景、258 カーソル、259〜266 薄い 0〜7、267 明るい前景、268 薄い前景）。
+fn color(c: TermColor, cx: &App) -> Hsla {
+    let dim = |mut c: Hsla| {
+        c.a *= 0.7;
+        c
     };
     match c {
-        AnsiColor::Named(n) => match overrides[n] {
-            // OSC でプログラムが色を変えた場合はそれに従う。
-            Some(rgb) if (n as usize) < 16 => theme::program_color(rgb.r, rgb.g, rgb.b),
-            _ => named(n),
-        },
-        AnsiColor::Indexed(i) => match overrides[i as usize] {
-            Some(rgb) => theme::program_color(rgb.r, rgb.g, rgb.b),
-            None => theme::ansi_color(i, cx),
-        },
-        AnsiColor::Spec(rgb) => theme::program_color(rgb.r, rgb.g, rgb.b),
+        TermColor::Named(n) if n < 16 => theme::ansi_color(n as u8, cx),
+        TermColor::Named(256) | TermColor::Named(267) => cx.token(Token::TerminalForeground),
+        TermColor::Named(257) => cx.token(Token::TerminalBackground),
+        TermColor::Named(258) => cx.token(Token::TerminalCursor),
+        TermColor::Named(268) => dim(cx.token(Token::TerminalForeground)),
+        TermColor::Named(n @ 259..=266) => dim(theme::ansi_color((n - 259) as u8, cx)),
+        TermColor::Named(_) => cx.token(Token::TerminalForeground),
+        TermColor::Indexed(i) => theme::ansi_color(i, cx),
+        TermColor::Rgb(r, g, b) => theme::program_color(r, g, b),
     }
 }
 
@@ -153,16 +134,11 @@ impl Element for TerminalElement {
         let origin = bounds.origin + point(px(PADDING), px(PADDING));
         let at = |col: usize, row: usize| origin + point(cell_width * col as f32, line_height * row as f32);
 
-        let term_handle = self.terminal.read(cx).term.clone();
-        let term = term_handle.lock();
-        let content = term.renderable_content();
-        let display_offset = content.display_offset as i32;
-        let colors = content.colors;
+        let terminal = self.terminal.read(cx);
         let mut rows: Vec<Vec<Segment>> = (0..lines).map(|_| Vec::new()).collect();
         let mut backgrounds = Vec::new();
         let mut cursor_char = None;
-        let cursor_point = content.cursor.point;
-        let cursor_shape = content.cursor.shape;
+        let cursor_at = terminal.cursor.map(|c| (c.row as usize, c.col as usize));
 
         // 1行ずつ、同じ見た目の文字をまとめて1つの断片として組む。
         let mut current: Option<(usize, usize, String, Vec<TextRun>, usize)> = None; // (row, col, text, runs, next_col)
@@ -179,140 +155,121 @@ impl Element for TerminalElement {
             }
         };
 
-        for indexed in content.display_iter {
-            let row = indexed.point.line.0 + display_offset;
-            if row < 0 || row as usize >= rows.len() {
-                continue;
-            }
-            let (row, col) = (row as usize, indexed.point.column.0);
-            let cell = &indexed.cell;
-            if cell
-                .flags
-                .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
-            {
-                continue;
-            }
-            let mut fg = color(cell.fg, colors, cx);
-            let mut bg = color(cell.bg, colors, cx);
-            if cell.flags.contains(Flags::INVERSE) {
-                std::mem::swap(&mut fg, &mut bg);
-            }
-            if cell.flags.contains(Flags::DIM) {
-                fg.a *= 0.7;
-            }
-            let wide = cell.flags.contains(Flags::WIDE_CHAR);
-            let width = if wide { 2 } else { 1 };
-            if bg != default_bg {
-                backgrounds.push((
-                    Bounds::new(at(col, row), size(cell_width * width as f32, line_height)),
-                    bg,
-                ));
-            }
-            let mut text = if cell.flags.contains(Flags::HIDDEN) {
-                ' '.to_string()
-            } else {
-                cell.c.to_string()
-            };
-            if let Some(zw) = cell.zerowidth() {
-                text.extend(zw.iter());
-            }
-            if indexed.point == cursor_point {
-                cursor_char = Some((text.clone(), bg, wide));
-            }
-            let mut f = base_font.clone();
-            if cell.flags.contains(Flags::BOLD) {
-                f.weight = FontWeight::BOLD;
-            }
-            if cell.flags.contains(Flags::ITALIC) {
-                f.style = FontStyle::Italic;
-            }
-            let underline = cell
-                .flags
-                .intersects(Flags::ALL_UNDERLINES)
-                .then(|| gpui_kit::UnderlineStyle {
-                    thickness: px(1.),
-                    color: Some(fg),
-                    wavy: cell.flags.contains(Flags::UNDERCURL),
-                });
-            let strike = cell
-                .flags
-                .contains(Flags::STRIKEOUT)
-                .then(|| gpui_kit::StrikethroughStyle {
-                    thickness: px(1.),
-                    color: Some(fg),
-                });
-            let run = TextRun {
-                len: text.len(),
-                font: f,
-                color: fg,
-                background_color: None,
-                underline,
-                strikethrough: strike,
-            };
-
-            // 全角文字は 2 マス幅で別の断片にする（列がずれないように）。
-            if wide {
-                flush(&mut current, &mut rows, window);
-                let line = window
-                    .text_system()
-                    .shape_line(text.into(), font_size, &[run], Some(cell_width * 2.));
-                rows[row].push(Segment { col, line });
-                continue;
-            }
-            match current.as_mut() {
-                Some((r, _, buf, runs, next)) if *r == row && *next == col => {
-                    buf.push_str(&text);
-                    let last = runs.last_mut().expect("non-empty");
-                    if last.font == run.font
-                        && last.color == run.color
-                        && last.underline == run.underline
-                        && last.strikethrough == run.strikethrough
-                    {
-                        last.len += run.len;
-                    } else {
-                        runs.push(run);
-                    }
-                    *next += 1;
+        for (row, cells) in terminal.rows.iter().enumerate().take(lines as usize) {
+            for (col, cell) in cells.iter().enumerate() {
+                // 全角文字の後ろの空きマス。
+                if cell.text.is_empty() {
+                    continue;
                 }
-                _ => {
+                let has = |f: u16| cell.flags & f != 0;
+                let mut fg = color(cell.fg, cx);
+                let mut bg = color(cell.bg, cx);
+                if has(F::INVERSE) {
+                    std::mem::swap(&mut fg, &mut bg);
+                }
+                if has(F::DIM) {
+                    fg.a *= 0.7;
+                }
+                let wide = has(F::WIDE);
+                let width = if wide { 2 } else { 1 };
+                if bg != default_bg {
+                    backgrounds.push((
+                        Bounds::new(at(col, row), size(cell_width * width as f32, line_height)),
+                        bg,
+                    ));
+                }
+                let text = if has(F::HIDDEN) {
+                    " ".to_string()
+                } else {
+                    cell.text.clone()
+                };
+                if cursor_at == Some((row, col)) {
+                    cursor_char = Some((text.clone(), bg, wide));
+                }
+                let mut f = base_font.clone();
+                if has(F::BOLD) {
+                    f.weight = FontWeight::BOLD;
+                }
+                if has(F::ITALIC) {
+                    f.style = FontStyle::Italic;
+                }
+                let underline = (has(F::UNDERLINE) || has(F::UNDERCURL)).then(|| gpui_kit::UnderlineStyle {
+                    thickness: px(1.),
+                    color: Some(fg),
+                    wavy: has(F::UNDERCURL),
+                });
+                let strike = has(F::STRIKEOUT).then(|| gpui_kit::StrikethroughStyle {
+                    thickness: px(1.),
+                    color: Some(fg),
+                });
+                let run = TextRun {
+                    len: text.len(),
+                    font: f,
+                    color: fg,
+                    background_color: None,
+                    underline,
+                    strikethrough: strike,
+                };
+
+                // 全角文字は 2 マス幅で別の断片にする（列がずれないように）。
+                if wide {
                     flush(&mut current, &mut rows, window);
-                    current = Some((row, col, text, vec![run], col + 1));
+                    let line = window
+                        .text_system()
+                        .shape_line(text.into(), font_size, &[run], Some(cell_width * 2.));
+                    rows[row].push(Segment { col, line });
+                    continue;
+                }
+                match current.as_mut() {
+                    Some((r, _, buf, runs, next)) if *r == row && *next == col => {
+                        buf.push_str(&text);
+                        let last = runs.last_mut().expect("non-empty");
+                        if last.font == run.font
+                            && last.color == run.color
+                            && last.underline == run.underline
+                            && last.strikethrough == run.strikethrough
+                        {
+                            last.len += run.len;
+                        } else {
+                            runs.push(run);
+                        }
+                        *next += 1;
+                    }
+                    _ => {
+                        flush(&mut current, &mut rows, window);
+                        current = Some((row, col, text, vec![run], col + 1));
+                    }
                 }
             }
         }
         flush(&mut current, &mut rows, window);
 
-        let cursor_row = cursor_point.line.0 + display_offset;
-        let cursor = (cursor_shape != CursorShape::Hidden
-            && content.mode.contains(TermMode::SHOW_CURSOR)
-            && cursor_row >= 0
-            && (cursor_row as usize) < lines as usize)
-            .then(|| {
-                let row = cursor_row as usize;
-                let wide = cursor_char.as_ref().is_some_and(|c| c.2);
-                let w = if wide { cell_width * 2. } else { cell_width };
-                let text = cursor_char
-                    .as_ref()
-                    .filter(|c| !c.0.trim().is_empty())
-                    .map(|(t, bg, _)| {
-                        let run = TextRun {
-                            len: t.len(),
-                            font: base_font.clone(),
-                            color: *bg,
-                            background_color: None,
-                            underline: None,
-                            strikethrough: None,
-                        };
-                        window
-                            .text_system()
-                            .shape_line(t.clone().into(), font_size, &[run], Some(w))
-                    });
-                Cursor {
-                    bounds: Bounds::new(at(cursor_point.column.0, row), size(w, line_height)),
-                    shape: cursor_shape,
-                    text,
-                }
-            });
+        let cursor = terminal.cursor.filter(|c| (c.row as usize) < lines as usize).map(|c| {
+            let row = c.row as usize;
+            let wide = cursor_char.as_ref().is_some_and(|c| c.2);
+            let w = if wide { cell_width * 2. } else { cell_width };
+            let text = cursor_char
+                .as_ref()
+                .filter(|c| !c.0.trim().is_empty())
+                .map(|(t, bg, _)| {
+                    let run = TextRun {
+                        len: t.len(),
+                        font: base_font.clone(),
+                        color: *bg,
+                        background_color: None,
+                        underline: None,
+                        strikethrough: None,
+                    };
+                    window
+                        .text_system()
+                        .shape_line(t.clone().into(), font_size, &[run], Some(w))
+                });
+            Cursor {
+                bounds: Bounds::new(at(c.col as usize, row), size(w, line_height)),
+                shape: c.shape,
+                text,
+            }
+        });
 
         Prepaint {
             cell,

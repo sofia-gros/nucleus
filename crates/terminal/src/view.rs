@@ -75,23 +75,23 @@ impl TerminalView {
         if self.terminal.is_some() || self.error.is_some() {
             return;
         }
-        let settings = settings::ActiveSettings::get(cx).terminal.clone();
-        match crate::model::spawn(self.cwd.clone(), &settings) {
-            Ok(spawned) => {
-                let terminal = cx.new(|cx| Terminal::new(spawned, cx));
-                self._subs.push(cx.observe(&terminal, |_, _, cx| cx.notify()));
-                self._subs
-                    .push(cx.subscribe(&terminal, |_, _, e: &TerminalEvent, cx| match e {
-                        TerminalEvent::TitleChanged | TerminalEvent::Exited => cx.notify(),
-                        TerminalEvent::Bell => {}
-                    }));
-                self.terminal = Some(terminal);
-            }
-            Err(e) => {
+        let cwd = self.cwd.clone();
+        let terminal = cx.new(|cx| Terminal::open(cwd, cx));
+        self._subs.push(cx.observe(&terminal, |this, t, cx| {
+            // 起動できなかったら、その理由を出す。
+            if let Some(e) = t.read(cx).error() {
                 log::error!("ターミナルを起動できなかった: {e}");
-                self.error = Some(e.to_string());
+                this.error = Some(e.to_string());
+                this.terminal = None;
             }
-        }
+            cx.notify()
+        }));
+        self._subs
+            .push(cx.subscribe(&terminal, |_, _, e: &TerminalEvent, cx| match e {
+                TerminalEvent::TitleChanged | TerminalEvent::Exited => cx.notify(),
+                TerminalEvent::Bell => {}
+            }));
+        self.terminal = Some(terminal);
     }
 
     fn restart(&mut self, cx: &mut Context<Self>) {
@@ -120,10 +120,7 @@ impl TerminalView {
             alt: ks.modifiers.alt,
             shift: ks.modifiers.shift,
         };
-        let app_cursor = t
-            .read(cx)
-            .mode()
-            .contains(alacritty_terminal::term::TermMode::APP_CURSOR);
+        let app_cursor = t.read(cx).mode() & remote::term_mode::APP_CURSOR != 0;
         if let Some(bytes) = keys::to_bytes(&ks.key, ks.key_char.as_deref(), mods, app_cursor) {
             t.read(cx).input(bytes);
             cx.stop_propagation();
@@ -147,10 +144,7 @@ impl TerminalView {
         let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) else {
             return;
         };
-        let bracketed = t
-            .read(cx)
-            .mode()
-            .contains(alacritty_terminal::term::TermMode::BRACKETED_PASTE);
+        let bracketed = t.read(cx).mode() & remote::term_mode::BRACKETED_PASTE != 0;
         t.read(cx).input(keys::paste(&text, bracketed));
     }
 }

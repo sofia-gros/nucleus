@@ -142,7 +142,7 @@ impl Workspace {
             .root()
             .map(|r| settings::workspace_settings_path(&r));
         let client = cx.remote();
-        let mut rx = client.subscribe();
+        let mut rx = client.subscribe_where(|e| matches!(e, remote::Event::DirChanged(_)));
         let dirs: Vec<PathBuf> = [&user, &workspace]
             .into_iter()
             .flatten()
@@ -153,6 +153,7 @@ impl Workspace {
         }
         let ours = move |e: &remote::Event| match e {
             remote::Event::DirChanged(d) => dirs.iter().any(|x| *x == remote::unwire(d)),
+            _ => false,
         };
         self.reload_settings(user.clone(), workspace.clone(), window, cx);
         self._settings_task = Some(cx.spawn_in(window, async move |this, cx| {

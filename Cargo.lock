@@ -3513,6 +3513,7 @@ dependencies = [
 name = "host"
 version = "0.1.0"
 dependencies = [
+ "alacritty_terminal",
  "anyhow",
  "futures",
  "ignore",
@@ -7397,12 +7398,12 @@ dependencies = [
 name = "terminal"
 version = "0.1.0"
 dependencies = [
- "alacritty_terminal",
  "anyhow",
  "futures",
  "gpui-kit",
  "i18n",
  "log",
+ "remote",
  "settings",
  "theme",
 ]

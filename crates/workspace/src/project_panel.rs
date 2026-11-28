@@ -180,14 +180,15 @@ impl ProjectPanel {
         self.tree = Some(tree);
         self.selected = None;
         let client = cx.remote();
-        let mut rx = client.subscribe();
+        let mut rx = client.subscribe_where(|e| matches!(e, remote::Event::DirChanged(_)));
         // 変更通知は 100ms まとめてから、該当フォルダだけを読み直す。
         self._watch_task = Some(cx.spawn(async move |this, cx| {
             while let Some(first) = rx.next().await {
                 let mut dirs = Vec::new();
                 let mut push = |e: remote::Event| {
-                    let remote::Event::DirChanged(d) = e;
-                    dirs.push(remote::unwire(&d));
+                    if let remote::Event::DirChanged(d) = e {
+                        dirs.push(remote::unwire(&d));
+                    }
                 };
                 push(first);
                 cx.background_executor().timer(Duration::from_millis(100)).await;

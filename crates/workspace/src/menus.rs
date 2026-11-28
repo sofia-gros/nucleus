@@ -303,18 +303,17 @@ impl Workspace {
             if started.is_err() {
                 return;
             }
-            let (u, d) = (url.clone(), dest.clone());
-            let result = cx
-                .background_spawn(async move {
-                    std::process::Command::new("git")
-                        .args(["clone", "--", &u])
-                        .arg(&d)
-                        .env("GIT_TERMINAL_PROMPT", "0")
-                        .output()
+            let run = cx.update(|cx| {
+                cx.remote().run_process(remote::ProcessSpec {
+                    program: "git".into(),
+                    args: vec!["clone".into(), "--".into(), url.clone(), remote::wire(&dest)],
+                    env: vec![("GIT_TERMINAL_PROMPT".into(), "0".into())],
+                    ..Default::default()
                 })
-                .await;
+            });
+            let result = run.await;
             cx.update_window(window, |_, window, cx| match result {
-                Ok(out) if out.status.success() => {
+                Ok(out) if out.success() => {
                     this.update(cx, |this, cx| this.open_path(dest.clone(), window, cx))
                         .ok();
                 }

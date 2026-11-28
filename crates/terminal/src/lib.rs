@@ -1,10 +1,10 @@
-//! ターミナル（docs/ARCHITECTURE.md §7）。alacritty_terminal で VT を解釈し、gpui で描く。
-//! PTY の読み書きは alacritty の EventLoop（専用スレッド）が行い、UI には更新の通知だけが届く。
+//! ターミナル（docs/ARCHITECTURE.md §7）。シェルと VT の解釈はホスト（host クレート）が行い、
+//! 変わった行が remote の知らせで届く。ここはそれを gpui で描き、キー入力をホストへ送る。
 
 pub mod keys;
 mod model;
 
-pub use model::{GridSize, Spawned, Terminal, TerminalEvent, spawn};
+pub use model::{GridSize, Terminal, TerminalEvent};
 mod element;
 mod view;
 

@@ -1,58 +1,12 @@
-//! 端末プロセスと画面の状態。
+//! 端末の画面の状態。端末そのもの（シェルと VT の解釈）はホストが動かし、変わった行がここへ届く。
 
-use std::{borrow::Cow, collections::HashMap, path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 
-use alacritty_terminal::{
-    event::{Event as TermEvent, EventListener, WindowSize},
-    event_loop::{EventLoop, EventLoopSender, Msg},
-    grid::{Dimensions, Scroll},
-    sync::FairMutex,
-    term::{Config, Term, TermMode},
-    tty,
-};
-use futures::{StreamExt as _, channel::mpsc::UnboundedSender};
+use futures::StreamExt as _;
 use gpui_kit::{ClipboardItem, Context, EventEmitter, Task};
+use remote::{Event, RemoteExt as _, Request, TermCell, TermCursor, TermSize, TerminalSpec};
 
-#[derive(Clone)]
-pub struct Listener(UnboundedSender<TermEvent>);
-
-impl EventListener for Listener {
-    fn send_event(&self, event: TermEvent) {
-        let _ = self.0.unbounded_send(event);
-    }
-}
-
-/// 画面の大きさ（セル数とセルの大きさ）。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct GridSize {
-    pub cols: u16,
-    pub lines: u16,
-    pub cell_width: u16,
-    pub cell_height: u16,
-}
-
-impl Dimensions for GridSize {
-    fn total_lines(&self) -> usize {
-        self.lines as usize
-    }
-    fn screen_lines(&self) -> usize {
-        self.lines as usize
-    }
-    fn columns(&self) -> usize {
-        self.cols as usize
-    }
-}
-
-impl From<GridSize> for WindowSize {
-    fn from(s: GridSize) -> Self {
-        WindowSize {
-            num_lines: s.lines,
-            num_cols: s.cols,
-            cell_width: s.cell_width,
-            cell_height: s.cell_height,
-        }
-    }
-}
+pub use remote::TermSize as GridSize;
 
 pub enum TerminalEvent {
     TitleChanged,
@@ -61,89 +15,82 @@ pub enum TerminalEvent {
 }
 
 pub struct Terminal {
-    pub(crate) term: Arc<FairMutex<Term<Listener>>>,
-    sender: EventLoopSender,
-    size: GridSize,
+    client: remote::Client,
+    /// ホストでの番号（開き終わるまでは None）。
+    id: Option<u64>,
+    size: TermSize,
+    pub(crate) rows: Vec<Vec<TermCell>>,
+    pub(crate) cursor: Option<TermCursor>,
+    mode: u32,
     title: Option<String>,
     exited: bool,
-    _events: Task<()>,
-}
-
-/// 起動した端末（まだ gpui の Entity になっていないもの）。
-pub struct Spawned {
-    term: Arc<FairMutex<Term<Listener>>>,
-    sender: EventLoopSender,
-    events: futures::channel::mpsc::UnboundedReceiver<TermEvent>,
-    size: GridSize,
-}
-
-/// シェルを起動する。`cwd` はプロジェクトのルートなど。PTY の読み書きは専用スレッドで始まる。
-pub fn spawn(cwd: Option<PathBuf>, settings: &settings::TerminalSettings) -> anyhow::Result<Spawned> {
-    let size = GridSize {
-        cols: 80,
-        lines: 24,
-        cell_width: 8,
-        cell_height: 18,
-    };
-    let (tx, events) = futures::channel::mpsc::unbounded();
-    let listener = Listener(tx);
-    let config = Config {
-        scrolling_history: settings.scrollback.min(1_000_000),
-        ..Config::default()
-    };
-    let term = Arc::new(FairMutex::new(Term::new(config, &size, listener.clone())));
-
-    let mut env = HashMap::new();
-    env.insert("TERM".to_string(), "xterm-256color".to_string());
-    env.insert("COLORTERM".to_string(), "truecolor".to_string());
-    env.insert("TERM_PROGRAM".to_string(), "nucleus".to_string());
-    // terminal.shell: 決めてあればそのシェル、なければ OS の既定。
-    let shell = settings
-        .shell
-        .as_ref()
-        .filter(|s| !s.trim().is_empty())
-        .map(|program| tty::Shell::new(program.clone(), settings.shell_args.clone()));
-    // Windows では項目が多いので、残りは既定値にする。
-    #[allow(clippy::needless_update)]
-    let options = tty::Options {
-        shell,
-        working_directory: cwd,
-        drain_on_exit: true,
-        env,
-        ..tty::Options::default()
-    };
-    let pty = tty::new(&options, size.into(), 0)?;
-    let event_loop = EventLoop::new(term.clone(), listener, pty, true, false)?;
-    let sender = event_loop.channel();
-    let _io_thread = event_loop.spawn();
-    Ok(Spawned {
-        term,
-        sender,
-        events,
-        size,
-    })
+    error: Option<String>,
+    _task: Task<()>,
 }
 
 impl Terminal {
-    pub fn new(spawned: Spawned, cx: &mut Context<Self>) -> Self {
-        let Spawned {
-            term,
-            sender,
-            mut events,
+    /// ホストにシェルを起動してもらう。`cwd` はプロジェクトのルートなど。
+    pub fn open(cwd: Option<PathBuf>, cx: &mut Context<Self>) -> Self {
+        let s = settings::ActiveSettings::get(cx).terminal.clone();
+        let size = TermSize {
+            cols: 80,
+            lines: 24,
+            cell_width: 8,
+            cell_height: 18,
+        };
+        let client = cx.remote();
+        // ターミナルの知らせだけを受け取る（番号は開くまで分からないので、ここでは種類だけで選ぶ）。
+        let mut events = client.subscribe_where(|e| {
+            matches!(
+                e,
+                Event::TerminalUpdate(_)
+                    | Event::TerminalTitle { .. }
+                    | Event::TerminalExited { .. }
+                    | Event::TerminalBell { .. }
+                    | Event::TerminalClipboard { .. }
+            )
+        });
+        let open = client.terminal_open(TerminalSpec {
+            cwd: cwd.as_deref().map(remote::wire),
+            shell: s.shell.clone(),
+            args: s.shell_args.clone(),
+            scrollback: s.scrollback,
             size,
-        } = spawned;
-        // 端末からの通知は、届いた分をまとめて1回の描画にする。
+        });
+        let client2 = client.clone();
         let task = cx.spawn(async move |this, cx| {
+            let client = client2;
+            let id = match open.await {
+                Ok(id) => id,
+                Err(e) => {
+                    this.update(cx, |t, cx| {
+                        t.error = Some(e.to_string());
+                        cx.notify();
+                    })
+                    .ok();
+                    return;
+                }
+            };
+            let alive = this.update(cx, |t, _| {
+                t.id = Some(id);
+                // 開いている間に大きさが変わっていたら伝える。
+                if t.size != size {
+                    client.send(Request::TerminalResize { id, size: t.size });
+                }
+            });
+            if alive.is_err() {
+                return;
+            }
+            // 届いた知らせをまとめて 1 回の描画にする。
             while let Some(first) = events.next().await {
                 let mut batch = vec![first];
                 while let Ok(e) = events.try_recv() {
                     batch.push(e);
                 }
-                let alive = this.update(cx, |this, cx| {
+                let alive = this.update(cx, |t, cx| {
                     for e in batch {
-                        this.handle_event(e, cx);
+                        t.handle(id, e, cx);
                     }
-                    cx.notify();
                 });
                 if alive.is_err() {
                     break;
@@ -151,40 +98,45 @@ impl Terminal {
             }
         });
         Terminal {
-            term,
-            sender,
+            client,
+            id: None,
             size,
+            rows: Vec::new(),
+            cursor: None,
+            mode: 0,
             title: None,
             exited: false,
-            _events: task,
+            error: None,
+            _task: task,
         }
     }
 
-    fn handle_event(&mut self, event: TermEvent, cx: &mut Context<Self>) {
+    fn handle(&mut self, id: u64, event: Event, cx: &mut Context<Self>) {
         match event {
-            TermEvent::Title(t) => {
-                self.title = Some(t);
+            Event::TerminalUpdate(u) if u.id == id => {
+                self.rows.resize(u.lines as usize, Vec::new());
+                for (row, cells) in u.rows {
+                    if let Some(r) = self.rows.get_mut(row as usize) {
+                        *r = cells;
+                    }
+                }
+                self.cursor = u.cursor;
+                self.mode = u.mode;
+                cx.notify();
+            }
+            Event::TerminalTitle { id: t, title } if t == id => {
+                self.title = title;
                 cx.emit(TerminalEvent::TitleChanged);
             }
-            TermEvent::ResetTitle => {
-                self.title = None;
-                cx.emit(TerminalEvent::TitleChanged);
-            }
-            TermEvent::PtyWrite(s) => self.write(Cow::Owned(s.into_bytes())),
-            TermEvent::ClipboardStore(_, text) => cx.write_to_clipboard(ClipboardItem::new_string(text)),
-            TermEvent::ClipboardLoad(_, format) => {
-                let text = cx.read_from_clipboard().and_then(|c| c.text()).unwrap_or_default();
-                self.write(Cow::Owned(format(&text).into_bytes()));
-            }
-            TermEvent::TextAreaSizeRequest(format) => {
-                let text = format(self.size.into());
-                self.write(Cow::Owned(text.into_bytes()));
-            }
-            TermEvent::ChildExit(_) | TermEvent::Exit => {
+            Event::TerminalExited { id: t } if t == id => {
                 self.exited = true;
                 cx.emit(TerminalEvent::Exited);
+                cx.notify();
             }
-            TermEvent::Bell => cx.emit(TerminalEvent::Bell),
+            Event::TerminalBell { id: t } if t == id => cx.emit(TerminalEvent::Bell),
+            Event::TerminalClipboard { id: t, text } if t == id => {
+                cx.write_to_clipboard(ClipboardItem::new_string(text));
+            }
             _ => {}
         }
     }
@@ -197,38 +149,46 @@ impl Terminal {
         self.exited
     }
 
-    pub fn mode(&self) -> TermMode {
-        *self.term.lock().mode()
+    /// 起動できなかったときの理由。
+    pub fn error(&self) -> Option<&str> {
+        self.error.as_deref()
     }
 
-    /// 端末へ書き込む（PTY への書き込みは EventLoop のスレッドが行う）。
-    pub fn write(&self, bytes: Cow<'static, [u8]>) {
-        let _ = self.sender.send(Msg::Input(bytes));
+    /// [`remote::term_mode`] の組み合わせ。
+    pub fn mode(&self) -> u32 {
+        self.mode
     }
 
-    /// キー入力。スクロールしていたら最下部に戻してから送る。
+    /// キー入力（表示はいちばん下に戻る）。
     pub fn input(&self, bytes: Vec<u8>) {
-        self.term.lock().scroll_display(Scroll::Bottom);
-        self.write(Cow::Owned(bytes));
+        if let Some(id) = self.id {
+            self.client.send(Request::TerminalInput { id, bytes });
+        }
     }
 
     pub fn scroll(&self, lines: i32) {
-        self.term.lock().scroll_display(Scroll::Delta(lines));
+        if let Some(id) = self.id {
+            self.client.send(Request::TerminalScroll { id, lines });
+        }
     }
 
-    pub fn resize(&mut self, size: GridSize) {
+    pub fn resize(&mut self, size: TermSize) {
         if size == self.size || size.cols == 0 || size.lines == 0 {
             return;
         }
         self.size = size;
-        self.term.lock().resize(size);
-        let _ = self.sender.send(Msg::Resize(size.into()));
+        if let Some(id) = self.id {
+            self.client.send(Request::TerminalResize { id, size });
+        }
     }
 }
 
+/// ビューを閉じたら、ホストの端末（シェル）も終わらせる。
 impl Drop for Terminal {
     fn drop(&mut self) {
-        let _ = self.sender.send(Msg::Shutdown);
+        if let Some(id) = self.id.take() {
+            self.client.send(Request::TerminalClose { id });
+        }
     }
 }
 

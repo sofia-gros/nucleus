@@ -26,10 +26,19 @@ use futures::channel::{mpsc, oneshot};
 
 use project::{Entry, search::SearchOptions, search::SearchResult};
 use proto::Frame;
-pub use proto::{ErrorKind, Event, RemoteError, Request, Response};
+pub use proto::{
+    CursorShape, ErrorKind, Event, ProcessOutput, ProcessSpec, RemoteError, Request, Response, TermCell, TermColor,
+    TermCursor, TermSize, TermUpdate, TerminalSpec, cell_flags, term_mode,
+};
 
 /// 送り出し口。符号化済みのフレームを相手に届ける。
 pub type Sender = Box<dyn Fn(Vec<u8>) + Send + Sync>;
+
+/// 知らせの受け手と、受け取るものの選び方。
+struct Subscriber {
+    filter: Box<dyn Fn(&Event) -> bool + Send + Sync>,
+    tx: mpsc::UnboundedSender<Event>,
+}
 
 /// ホストへの窓口。複製しても同じつながりを指す。
 #[derive(Clone)]
@@ -39,7 +48,7 @@ struct Inner {
     send: Sender,
     next_id: AtomicU64,
     pending: Mutex<HashMap<u64, oneshot::Sender<Result<Response, RemoteError>>>>,
-    subscribers: Mutex<Vec<mpsc::UnboundedSender<Event>>>,
+    subscribers: Mutex<Vec<Subscriber>>,
     closed: AtomicBool,
 }
 
@@ -68,7 +77,7 @@ impl Client {
                     .subscribers
                     .lock()
                     .unwrap()
-                    .retain(|s| s.unbounded_send(event.clone()).is_ok());
+                    .retain(|s| !(s.filter)(&event) || s.tx.unbounded_send(event.clone()).is_ok());
             }
             Ok(other) => log::warn!("ホストから届くはずのないフレーム: {other:?}"),
             Err(e) => log::warn!("ホストからのフレームを読めない: {e}"),
@@ -88,11 +97,22 @@ impl Client {
         !self.0.closed.load(Ordering::SeqCst)
     }
 
-    /// ホストからの知らせを受け取る。
+    /// ホストからの知らせをすべて受け取る。
     pub fn subscribe(&self) -> mpsc::UnboundedReceiver<Event> {
+        self.subscribe_where(|_| true)
+    }
+
+    /// ホストからの知らせのうち、`filter` が true を返すものだけを受け取る。
+    pub fn subscribe_where(
+        &self,
+        filter: impl Fn(&Event) -> bool + Send + Sync + 'static,
+    ) -> mpsc::UnboundedReceiver<Event> {
         let (tx, rx) = mpsc::unbounded();
         if self.is_connected() {
-            self.0.subscribers.lock().unwrap().push(tx);
+            self.0.subscribers.lock().unwrap().push(Subscriber {
+                filter: Box::new(filter),
+                tx,
+            });
         }
         rx
     }
@@ -218,6 +238,37 @@ impl Client {
                 r => Err(unexpected(r)),
             }
         }
+    }
+}
+
+impl Client {
+    /// プログラムを動かして、終わるのを待つ。
+    pub fn run_process(&self, spec: ProcessSpec) -> impl Future<Output = Result<ProcessOutput, RemoteError>> + use<> {
+        let p = self.request(Request::RunProcess(spec));
+        async move {
+            match p.await? {
+                Response::Output(o) => Ok(o),
+                r => Err(unexpected(r)),
+            }
+        }
+    }
+}
+
+impl Client {
+    /// ターミナルを開く。返事はターミナルの番号。
+    pub fn terminal_open(&self, spec: TerminalSpec) -> impl Future<Output = Result<u64, RemoteError>> + use<> {
+        let p = self.request(Request::TerminalOpen(spec));
+        async move {
+            match p.await? {
+                Response::Terminal(id) => Ok(id),
+                r => Err(unexpected(r)),
+            }
+        }
+    }
+
+    /// 返事を待たずに送る（キー入力など。送った順に届く）。
+    pub fn send(&self, request: Request) {
+        drop(DetachOnDrop(self.request(request)));
     }
 }
 
