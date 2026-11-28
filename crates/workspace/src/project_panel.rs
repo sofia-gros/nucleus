@@ -24,15 +24,43 @@ use project::{EntryKind, ProjectTree, Row};
 use remote::RemoteExt as _;
 use theme::{Token, TokenColors as _};
 
+/// `explorer.sort_order` に従って並べる。
+fn sort_entries(entries: &mut [project::Entry], order: settings::SortOrder) {
+    use settings::SortOrder;
+    let name = |e: &project::Entry| (e.name.to_lowercase(), e.name.clone());
+    let ext = |e: &project::Entry| {
+        std::path::Path::new(&e.name)
+            .extension()
+            .map(|x| x.to_string_lossy().to_lowercase())
+            .unwrap_or_default()
+    };
+    let dir_first = |e: &project::Entry| e.kind != EntryKind::Dir;
+    match order {
+        SortOrder::Default => entries.sort_by_key(|e| (dir_first(e), name(e))),
+        SortOrder::Mixed => entries.sort_by_key(name),
+        SortOrder::FilesFirst => entries.sort_by_key(|e| (!dir_first(e), name(e))),
+        SortOrder::Type => entries.sort_by_key(|e| (dir_first(e), ext(e), name(e))),
+    }
+}
+
+/// 1 段の字下げ（`workbench.tree_indent`）。
+fn tree_indent(cx: &App) -> f32 {
+    settings::ActiveSettings::get(cx).workbench.tree_indent.clamp(4.0, 40.0)
+}
+
 /// インデントの縦線（VSCode と同じく、祖先のフォルダの矢印の真下に引く）。
 fn indent_guides(depth: usize, cx: &App) -> Vec<gpui_kit::Div> {
+    if !settings::ActiveSettings::get(cx).workbench.tree_indent_guides {
+        return Vec::new();
+    }
+    let step = tree_indent(cx);
     (0..depth)
         .map(|level| {
             div()
                 .absolute()
                 .top_0()
                 .bottom_0()
-                .left(px(8. + level as f32 * 16. + 7.))
+                .left(px(8. + level as f32 * step + 7.))
                 .w(px(1.))
                 .bg(cx.token(Token::MutedForeground).opacity(0.4))
         })
@@ -99,11 +127,30 @@ pub struct ProjectPanel {
     /// ツリーの中で入力している名前（新しいファイル・フォルダ、名前の変更）。
     pub(crate) editing: Option<crate::project_actions::Edit>,
     _watch_task: Option<Task<()>>,
+    /// 読み込みを待って見せるファイル（explorer.auto_reveal）。
+    pending_reveal: Option<PathBuf>,
+    _settings: gpui_kit::Subscription,
 }
 
 impl ProjectPanel {
     pub fn new(cx: &mut Context<Self>) -> Self {
+        // 除外や並びの設定が変わったら、読み込んであるフォルダを読み直す。
+        let key = |cx: &App| {
+            let s = settings::ActiveSettings::get(cx);
+            (s.files.exclude.clone(), s.explorer.sort_order)
+        };
+        let mut last = key(cx);
+        let settings_sub = cx.observe_global::<settings::ActiveSettings>(move |this, cx| {
+            let now = key(cx);
+            if now != last {
+                last = now;
+                this.reload_all(cx);
+            }
+            cx.notify();
+        });
         ProjectPanel {
+            _settings: settings_sub,
+            pending_reveal: None,
             focus: cx.focus_handle(),
             tree: None,
             rows: Arc::new(Vec::new()),
@@ -207,6 +254,37 @@ impl ProjectPanel {
         }
     }
 
+    /// ファイルをツリーで見せる（途中のフォルダを開き、選んで、見える所までスクロールする）。
+    pub(crate) fn reveal(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        let Some(root) = self.root() else { return };
+        if !path.starts_with(&root) || self.selected.as_ref() == Some(&path) {
+            return;
+        }
+        let mut dirs: Vec<PathBuf> = path
+            .ancestors()
+            .skip(1)
+            .take_while(|d| d.starts_with(&root))
+            .map(PathBuf::from)
+            .collect();
+        dirs.reverse();
+        for d in dirs {
+            self.expand(&d, cx);
+        }
+        self.selected = Some(path.clone());
+        self.pending_reveal = Some(path);
+        self.scroll_to_pending();
+        cx.notify();
+    }
+
+    /// 見せたいファイルの行ができていれば、そこまでスクロールする。
+    fn scroll_to_pending(&mut self) {
+        let Some(path) = &self.pending_reveal else { return };
+        if let Some(ix) = self.rows.iter().position(|r| &r.path == path) {
+            self.scroll.scroll_to_item(ix, gpui_kit::ScrollStrategy::Center);
+            self.pending_reveal = None;
+        }
+    }
+
     /// 表示する行（ツリーの行と、新しく作るときの入力欄の行）。名前の変更はその行の中で入力する。
     fn slots(&self) -> Vec<Slot> {
         let mut out: Vec<Slot> = (0..self.rows.len()).map(Slot::Row).collect();
@@ -238,7 +316,7 @@ impl ProjectPanel {
             .children(indent_guides(depth, cx))
             .h(px(24.))
             .w_full()
-            .pl(px(8. + depth as f32 * 16.))
+            .pl(px(8. + depth as f32 * tree_indent(cx)))
             .pr_2()
             .gap_1()
             .child(div().w(px(14.)).flex_none())
@@ -314,11 +392,13 @@ impl ProjectPanel {
         cx.spawn(async move |this, cx| {
             let result = read.await;
             this.update(cx, |this, cx| {
+                let result = result.map(|entries| this.arrange(entries, cx));
                 let ok = result.is_ok();
                 if let Some(tree) = this.tree.as_mut() {
                     tree.set_children(&dir, result);
                     this.rows = tree.rows();
                 }
+                this.scroll_to_pending();
                 if ok {
                     cx.remote().watch(&dir);
                 }
@@ -327,6 +407,32 @@ impl ProjectPanel {
             .ok();
         })
         .detach();
+    }
+
+    /// 設定（`files.exclude`、`explorer.sort_order`）に合わせて、出すものと並びを決める。
+    fn arrange(&self, mut entries: Vec<project::Entry>, cx: &App) -> Vec<project::Entry> {
+        let s = settings::ActiveSettings::get(cx);
+        if let Some(root) = self.root() {
+            let ex = project::Excludes::new(&s.files.exclude);
+            entries.retain(|e| {
+                let rel = e.path.strip_prefix(&root).unwrap_or(&e.path);
+                !ex.is_excluded(&rel.to_string_lossy().replace('\\', "/"))
+            });
+        }
+        sort_entries(&mut entries, s.explorer.sort_order);
+        entries
+    }
+
+    /// 読み込んであるフォルダをすべて読み直す（並びや除外の設定が変わったとき）。
+    fn reload_all(&mut self, cx: &mut Context<Self>) {
+        let dirs: Vec<PathBuf> = self
+            .tree
+            .as_ref()
+            .map(|t| t.loaded_dirs().map(PathBuf::from).collect())
+            .unwrap_or_default();
+        for d in dirs {
+            self.refresh_dir(&d, cx);
+        }
     }
 
     fn click(&mut self, ix: usize, cx: &mut Context<Self>) {
@@ -380,7 +486,7 @@ impl ProjectPanel {
             .children(indent_guides(row.depth, cx))
             .h(px(24.))
             .w_full()
-            .pl(px(8. + row.depth as f32 * 16.))
+            .pl(px(8. + row.depth as f32 * tree_indent(cx)))
             .pr_2()
             .gap_1()
             .border_l_2()

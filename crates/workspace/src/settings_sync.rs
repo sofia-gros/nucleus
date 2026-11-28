@@ -63,7 +63,8 @@ fn apply_theme(s: &Settings, cx: &mut App) {
         Some(mut file) => {
             let mut fonts = file.fonts.clone().unwrap_or_default();
             fonts.mono = s.editor.font_family.clone();
-            fonts.mono_size = s.editor.font_size;
+            // window.zoom_level はエディタの文字にも効かせる（画面のほかの部分は rem の大きさで変わる）。
+            fonts.mono_size = s.editor.font_size * s.window.zoom();
             file.fonts = Some(fonts);
             let tokens = extension_host::ExtensionStore::get(cx)
                 .map(|e| e.tokens.clone())
@@ -84,7 +85,10 @@ fn apply_theme(s: &Settings, cx: &mut App) {
 /// 設定を反映する。`prev` と同じ項目は触らない（言語の切り替えなどで全画面を描き直さないため）。
 pub fn apply(s: &Settings, prev: Option<&Settings>, cx: &mut App) {
     let theme_changed = prev.is_none_or(|p| {
-        p.theme != s.theme || p.editor.font_family != s.editor.font_family || p.editor.font_size != s.editor.font_size
+        p.theme != s.theme
+            || p.editor.font_family != s.editor.font_family
+            || p.editor.font_size != s.editor.font_size
+            || p.window.zoom_level != s.window.zoom_level
     });
     if theme_changed {
         apply_theme(s, cx);

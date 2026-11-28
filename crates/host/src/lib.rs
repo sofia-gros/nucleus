@@ -132,6 +132,10 @@ impl Connection {
     }
 
     fn watch(&self, dir: &Path) {
+        // まだないフォルダ（.nucleus など）は見張れない。できたら、親の変更で読み直される。
+        if !dir.is_dir() {
+            return;
+        }
         let mut slot = self.0.watcher.lock().unwrap();
         if slot.is_none() {
             match DirWatcher::new() {

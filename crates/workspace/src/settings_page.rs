@@ -47,16 +47,35 @@ pub struct ChooseSetting {
 enum Category {
     General,
     Editor,
+    Files,
+    Workbench,
+    Explorer,
+    Search,
+    Terminal,
     Extensions,
 }
 
 impl Category {
-    const ALL: [Category; 3] = [Category::General, Category::Editor, Category::Extensions];
+    const ALL: [Category; 8] = [
+        Category::General,
+        Category::Editor,
+        Category::Files,
+        Category::Workbench,
+        Category::Explorer,
+        Category::Search,
+        Category::Terminal,
+        Category::Extensions,
+    ];
 
     fn key(self) -> &'static str {
         match self {
             Category::General => "core.settings.general",
             Category::Editor => "core.settings.editor",
+            Category::Files => "core.settings.files",
+            Category::Workbench => "core.settings.workbench",
+            Category::Explorer => "core.settings.explorer",
+            Category::Search => "core.settings.search-category",
+            Category::Terminal => "core.settings.terminal",
             Category::Extensions => "core.settings.extensions",
         }
     }
@@ -65,6 +84,11 @@ impl Category {
         match self {
             Category::General => IconName::Settings2,
             Category::Editor => IconName::FileCode,
+            Category::Files => IconName::Save,
+            Category::Workbench => IconName::LayoutDashboard,
+            Category::Explorer => IconName::ListTree,
+            Category::Search => IconName::Search,
+            Category::Terminal => IconName::SquareTerminal,
             Category::Extensions => IconName::Puzzle,
         }
     }
@@ -74,8 +98,21 @@ impl Category {
 enum Control {
     Switch,
     Choice(PaletteKind),
-    Number { min: f64, max: f64, integer: bool },
-    Text,
+    /// 決まった値から選ぶ（表示名は `core.settings.value.<値>`）。
+    Enum(&'static [&'static str]),
+    /// 数。`optional` なら空にすると null（既定に戻る）。
+    Number {
+        min: f64,
+        max: f64,
+        integer: bool,
+        optional: bool,
+    },
+    /// 文字。`optional` なら空にすると null（既定に戻る）。
+    Text {
+        optional: bool,
+    },
+    /// 文字の一覧（glob など）。
+    List,
 }
 
 /// 1つの設定。`key` は `editor.font_size` のように `.` でつなぐ。
@@ -85,81 +122,118 @@ struct Item {
     control: Control,
 }
 
+const fn item(category: Category, key: &'static str, control: Control) -> Item {
+    Item { category, key, control }
+}
+
+const fn int(min: f64, max: f64) -> Control {
+    Control::Number {
+        min,
+        max,
+        integer: true,
+        optional: false,
+    }
+}
+
+const fn float(min: f64, max: f64) -> Control {
+    Control::Number {
+        min,
+        max,
+        integer: false,
+        optional: false,
+    }
+}
+
+use Category as C;
+use Control::List;
+
+const SW: Control = Control::Switch;
+
 const ITEMS: &[Item] = &[
-    Item {
-        category: Category::General,
-        key: "theme",
-        control: Control::Choice(PaletteKind::Themes),
-    },
-    Item {
-        category: Category::General,
-        key: "language",
-        control: Control::Choice(PaletteKind::Languages),
-    },
-    Item {
-        category: Category::General,
-        key: "restore_session",
-        control: Control::Switch,
-    },
-    Item {
-        category: Category::Editor,
-        key: "editor.font_family",
-        control: Control::Text,
-    },
-    Item {
-        category: Category::Editor,
-        key: "editor.font_size",
-        control: Control::Number {
-            min: 8.0,
-            max: 40.0,
+    item(C::General, "theme", Control::Choice(PaletteKind::Themes)),
+    item(C::General, "language", Control::Choice(PaletteKind::Languages)),
+    item(C::General, "restore_session", SW),
+    item(C::General, "window.zoom_level", float(-5.0, 9.0)),
+    // テキストエディタ
+    item(C::Editor, "editor.font_family", Control::Text { optional: false }),
+    item(C::Editor, "editor.font_size", float(8.0, 40.0)),
+    item(C::Editor, "editor.line_height", float(1.0, 3.0)),
+    item(C::Editor, "editor.tab_size", int(1.0, 16.0)),
+    item(C::Editor, "editor.hard_tabs", SW),
+    item(C::Editor, "editor.detect_indentation", SW),
+    item(C::Editor, "editor.soft_wrap", SW),
+    item(C::Editor, "editor.wrapping_indent", Control::Enum(&["none", "same"])),
+    item(C::Editor, "editor.line_numbers", SW),
+    item(C::Editor, "editor.indent_guides", SW),
+    item(C::Editor, "editor.render_whitespace", Control::Enum(&["none", "all"])),
+    item(C::Editor, "editor.folding", SW),
+    item(C::Editor, "editor.auto_closing_brackets", SW),
+    item(C::Editor, "editor.auto_indent", SW),
+    item(C::Editor, "editor.scroll_beyond_last_line", SW),
+    item(C::Editor, "editor.cursor_surrounding_lines", int(0.0, 50.0)),
+    item(C::Editor, "editor.cursor_blinking", Control::Enum(&["blink", "solid"])),
+    item(C::Editor, "editor.highlight_line_only_when_focused", SW),
+    item(C::Editor, "editor.format_on_save", SW),
+    item(C::Editor, "editor.hover", SW),
+    // ファイル
+    item(
+        C::Files,
+        "files.auto_save",
+        Control::Enum(&["off", "after_delay", "on_focus_change"]),
+    ),
+    item(C::Files, "files.auto_save_delay", int(100.0, 600_000.0)),
+    item(C::Files, "files.trim_trailing_whitespace", SW),
+    item(C::Files, "files.insert_final_newline", SW),
+    item(C::Files, "files.trim_final_newlines", SW),
+    item(C::Files, "files.eol", Control::Enum(&["auto", "lf", "crlf"])),
+    item(C::Files, "files.exclude", List),
+    // ワークベンチ
+    item(C::Workbench, "workbench.status_bar", SW),
+    item(C::Workbench, "workbench.tree_indent", float(4.0, 40.0)),
+    item(C::Workbench, "workbench.tree_indent_guides", SW),
+    item(C::Workbench, "workbench.startup_welcome", SW),
+    // エクスプローラー
+    item(C::Explorer, "explorer.confirm_delete", SW),
+    item(
+        C::Explorer,
+        "explorer.sort_order",
+        Control::Enum(&["default", "mixed", "files_first", "type"]),
+    ),
+    item(C::Explorer, "explorer.auto_reveal", SW),
+    // 検索
+    item(C::Search, "search.exclude", List),
+    item(C::Search, "search.use_ignore_files", SW),
+    item(C::Search, "search.smart_case", SW),
+    item(C::Search, "search.max_results", int(100.0, 1_000_000.0)),
+    // ターミナル
+    item(C::Terminal, "terminal.shell", Control::Text { optional: true }),
+    item(C::Terminal, "terminal.shell_args", List),
+    item(C::Terminal, "terminal.font_family", Control::Text { optional: true }),
+    item(
+        C::Terminal,
+        "terminal.font_size",
+        Control::Number {
+            min: 6.0,
+            max: 72.0,
             integer: false,
+            optional: true,
         },
-    },
-    Item {
-        category: Category::Editor,
-        key: "editor.tab_size",
-        control: Control::Number {
-            min: 1.0,
-            max: 16.0,
-            integer: true,
-        },
-    },
-    Item {
-        category: Category::Editor,
-        key: "editor.hard_tabs",
-        control: Control::Switch,
-    },
-    Item {
-        category: Category::Editor,
-        key: "editor.soft_wrap",
-        control: Control::Switch,
-    },
-    Item {
-        category: Category::Editor,
-        key: "editor.line_numbers",
-        control: Control::Switch,
-    },
-    Item {
-        category: Category::Editor,
-        key: "editor.indent_guides",
-        control: Control::Switch,
-    },
-    Item {
-        category: Category::Extensions,
-        key: "check_extension_updates",
-        control: Control::Switch,
-    },
-    Item {
-        category: Category::Extensions,
-        key: "extensions_registry",
-        control: Control::Text,
-    },
+    ),
+    item(C::Terminal, "terminal.line_height", float(1.0, 3.0)),
+    item(C::Terminal, "terminal.scrollback", int(0.0, 1_000_000.0)),
+    // 拡張機能
+    item(C::Extensions, "check_extension_updates", SW),
+    item(C::Extensions, "extensions_registry", Control::Text { optional: true }),
 ];
 
 /// いまの設定を JSON で読む（`editor.x` は入れ子）。
 fn current(key: &str, cx: &App) -> Value {
     let s = serde_json::to_value(settings::ActiveSettings::get(cx).clone()).unwrap_or_default();
     key.split('.').fold(s, |v, k| v.get(k).cloned().unwrap_or(Value::Null))
+}
+
+fn value_key(value: &str) -> String {
+    format!("core.settings.value.{}", value.replace('_', "-"))
 }
 
 fn i18n_key(key: &str) -> String {
@@ -171,6 +245,7 @@ pub struct SettingsPage {
     category: Category,
     search: Entity<InputState>,
     inputs: HashMap<&'static str, (Entity<InputState>, Subscription)>,
+    list_inputs: HashMap<&'static str, (Entity<InputState>, Subscription)>,
     errors: HashSet<&'static str>,
     _subscriptions: Vec<Subscription>,
 }
@@ -198,6 +273,7 @@ impl SettingsPage {
             category: Category::General,
             search,
             inputs: HashMap::new(),
+            list_inputs: HashMap::new(),
             errors: HashSet::new(),
             _subscriptions: subs,
         }
@@ -234,15 +310,17 @@ impl SettingsPage {
             }
             let text = input.read(cx).value().trim().to_string();
             let value = match control {
-                Control::Number { min, max, integer } => text
+                // 空にすると既定に戻す。
+                Control::Number { optional: true, .. } | Control::Text { optional: true } if text.is_empty() => {
+                    Some(Value::Null)
+                }
+                Control::Number { min, max, integer, .. } => text
                     .parse::<f64>()
                     .ok()
                     .filter(|n| n.is_finite() && *n >= min && *n <= max && (!integer || n.fract() == 0.0))
                     .map(|n| if integer { json!(n as i64) } else { json!(n) }),
-                // 空の一覧の場所は「公式」に戻す。
-                Control::Text if key == "extensions_registry" && text.is_empty() => Some(Value::Null),
-                Control::Text if text.is_empty() => None,
-                Control::Text => Some(json!(text)),
+                Control::Text { .. } if text.is_empty() => None,
+                Control::Text { .. } => Some(json!(text)),
                 _ => None,
             };
             match value {
@@ -306,9 +384,42 @@ impl SettingsPage {
                     })
                     .into_any_element()
             }
-            Control::Number { .. } | Control::Text => {
+            Control::Enum(values) => {
+                let focus = self.focus.clone();
+                let now = current(key, cx);
+                let label = now
+                    .as_str()
+                    .map(|v| cx.t(&value_key(v)).to_string())
+                    .unwrap_or_default();
+                let options: Vec<(&'static str, String, bool)> = values
+                    .iter()
+                    .map(|v| (*v, cx.t(&value_key(v)).to_string(), now.as_str() == Some(*v)))
+                    .collect();
+                Button::new(SharedString::from(key))
+                    .small()
+                    .outline()
+                    .label(label)
+                    .icon(IconName::ChevronDown)
+                    .dropdown_menu(move |m: PopupMenu, _, _| {
+                        let mut m = m.action_context(focus.clone());
+                        for (value, label, checked) in &options {
+                            m = m.menu_with_check(
+                                label.clone(),
+                                *checked,
+                                Box::new(ChooseSetting {
+                                    key: key.to_string(),
+                                    value: json!(value).to_string(),
+                                }),
+                            );
+                        }
+                        m
+                    })
+                    .into_any_element()
+            }
+            Control::List => self.list_control(key, window, cx),
+            Control::Number { .. } | Control::Text { .. } => {
                 let input = self.input(item, window, cx);
-                let wide = matches!(item.control, Control::Text);
+                let wide = matches!(item.control, Control::Text { .. });
                 let invalid = self.errors.contains(key);
                 v_flex()
                     .items_end()
@@ -329,6 +440,73 @@ impl SettingsPage {
                     .into_any_element()
             }
         }
+    }
+
+    /// 文字の一覧（`files.exclude` など）。1 行ずつ消せて、下の欄で足せる。
+    fn list_control(&mut self, key: &'static str, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let values: Vec<String> = current(key, cx)
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_default();
+        let add = match self.list_inputs.get(key) {
+            Some((i, _)) => i.clone(),
+            None => {
+                let input = cx.new(|cx| InputState::new(window, cx).placeholder(cx.t("core.settings.list-add")));
+                let sub = cx.subscribe_in(&input, window, move |this, input, e: &InputEvent, window, cx| {
+                    if !matches!(e, InputEvent::PressEnter { .. }) {
+                        return;
+                    }
+                    let text = input.read(cx).value().trim().to_string();
+                    if text.is_empty() {
+                        return;
+                    }
+                    let mut list: Vec<Value> = current(key, cx).as_array().cloned().unwrap_or_default();
+                    if !list.iter().any(|v| v.as_str() == Some(&text)) {
+                        list.push(json!(text));
+                        this.set(key, Value::Array(list), cx);
+                    }
+                    input.update(cx, |s, cx| s.set_value("", window, cx));
+                });
+                self.list_inputs.insert(key, (input.clone(), sub));
+                input
+            }
+        };
+        let rows = values.into_iter().enumerate().map(|(ix, v)| {
+            h_flex()
+                .gap_2()
+                .h(px(26.))
+                .pl_2()
+                .rounded_sm()
+                .bg(cx.token(Token::ListHoverBackground))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_xs()
+                        .font_family("JetBrains Mono")
+                        .child(v),
+                )
+                .child(
+                    Button::new(SharedString::from(format!("{key}-remove-{ix}")))
+                        .xsmall()
+                        .ghost()
+                        .icon(IconName::X)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            let mut list: Vec<Value> = current(key, cx).as_array().cloned().unwrap_or_default();
+                            if ix < list.len() {
+                                list.remove(ix);
+                                this.set(key, Value::Array(list), cx);
+                            }
+                        })),
+                )
+        });
+        v_flex()
+            .w(px(280.))
+            .gap_1()
+            .children(rows)
+            .child(editor::fields::input(&add, window, cx).small())
+            .into_any_element()
     }
 
     fn row(&mut self, item: &Item, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {

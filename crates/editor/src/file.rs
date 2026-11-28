@@ -101,6 +101,81 @@ pub fn encode<'a>(chunks: impl Iterator<Item = &'a str>, line_ending: LineEnding
     out
 }
 
+/// 保存するときの手直し（`files.trim_trailing_whitespace` など）。
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SaveFixes {
+    pub trim_trailing_whitespace: bool,
+    pub insert_final_newline: bool,
+    pub trim_final_newlines: bool,
+}
+
+/// 手直しのための置き換え（バイトの範囲と新しい文字列）。後ろから順に並ぶ（そのまま順に当てられる）。
+pub fn save_fixes(text: &str, fixes: SaveFixes) -> Vec<(std::ops::Range<usize>, String)> {
+    let mut edits = Vec::new();
+    // 末尾の改行の始まり（`trim_final_newlines` で消す範囲の先頭）。
+    let body_end = text.trim_end_matches('\n').len();
+    if fixes.trim_final_newlines && text.len() > body_end + 1 {
+        edits.push((body_end + 1..text.len(), String::new()));
+    }
+    if fixes.insert_final_newline && !text.is_empty() && !text.ends_with('\n') {
+        edits.push((text.len()..text.len(), "\n".into()));
+    }
+    if fixes.trim_trailing_whitespace {
+        let mut start = 0;
+        let mut lines = Vec::new();
+        for line in text.split_inclusive('\n') {
+            let content = line.strip_suffix('\n').unwrap_or(line);
+            let kept = content.trim_end_matches([' ', '\t']).len();
+            if kept < content.len() {
+                lines.push((start + kept..start + content.len(), String::new()));
+            }
+            start += line.len();
+        }
+        edits.extend(lines.into_iter().rev());
+    }
+    // 重ならないように、後ろから並べる。
+    edits.sort_by_key(|e| std::cmp::Reverse(e.0.start));
+    edits
+}
+
+/// 中身からインデントを推し量る（`editor.detect_indentation`）。分からなければ None。
+/// 戻り値は（タブ幅, タブ文字を使うか）。
+pub fn detect_indentation(text: &str) -> Option<(usize, bool)> {
+    let (mut tabs, mut spaces) = (0usize, 0usize);
+    // 隣り合う行の、字下げの差の数（2 か 4 か 8 か）。
+    let mut deltas = [0usize; 9];
+    let mut prev = 0usize;
+    for line in text.lines().take(10_000) {
+        if line.trim().is_empty() {
+            continue;
+        }
+        if line.starts_with('\t') {
+            tabs += 1;
+            continue;
+        }
+        let n = line.len() - line.trim_start_matches(' ').len();
+        if n > 0 {
+            spaces += 1;
+        }
+        let d = n.abs_diff(prev);
+        if (2..=8).contains(&d) {
+            deltas[d] += 1;
+        }
+        prev = n;
+    }
+    if tabs == 0 && spaces == 0 {
+        return None;
+    }
+    if tabs > spaces {
+        return Some((4, true));
+    }
+    let (width, _) = [2usize, 4, 8, 3]
+        .iter()
+        .map(|&w| (w, deltas[w]))
+        .max_by_key(|&(_, n)| n)?;
+    (deltas[width] > 0).then_some((width, false))
+}
+
 /// ファイル名から gpui-kit の言語名を決める（tree-sitter の文法の名前）。
 pub fn language_for(path: &Path) -> String {
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_lowercase();
@@ -174,6 +249,38 @@ mod tests {
             encode([l.text.as_str()].into_iter(), l.line_ending),
             b"fn main() {}\r\n"
         );
+    }
+
+    #[test]
+    fn save_fixes_trim_and_add_newlines() {
+        let all = SaveFixes {
+            trim_trailing_whitespace: true,
+            insert_final_newline: true,
+            trim_final_newlines: true,
+        };
+        let apply = |text: &str, f| {
+            let mut t = text.to_string();
+            for (r, s) in save_fixes(text, f) {
+                t.replace_range(r, &s);
+            }
+            t
+        };
+        assert_eq!(apply("a  \nb\t\nc", all), "a\nb\nc\n");
+        assert_eq!(apply("a\n\n\n", all), "a\n");
+        assert_eq!(apply("a  ", SaveFixes::default()), "a  ");
+        assert_eq!(apply("", all), "");
+        assert!(save_fixes("clean\n", all).is_empty());
+    }
+
+    #[test]
+    fn detects_indentation() {
+        assert_eq!(
+            detect_indentation("fn a() {\n  b();\n  if x {\n    c();\n  }\n}\n"),
+            Some((2, false))
+        );
+        assert_eq!(detect_indentation("a:\n    b\n    c:\n        d\n"), Some((4, false)));
+        assert_eq!(detect_indentation("a {\n\tb\n\tc\n}\n"), Some((4, true)));
+        assert_eq!(detect_indentation("plain\ntext\n"), None);
     }
 
     #[test]

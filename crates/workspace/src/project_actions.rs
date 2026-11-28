@@ -101,15 +101,21 @@ impl ProjectPanel {
                 let msg = cx.t_args("core.tree.confirm-delete", &[("name", name.into())]);
                 let detail = cx.t("core.tree.delete-detail");
                 let answers = [cx.t("core.tree.delete"), cx.t("core.prompt.cancel")];
-                let answer = window.prompt(
-                    PromptLevel::Warning,
-                    &msg,
-                    Some(&detail),
-                    &answers.iter().map(|a| a.as_ref()).collect::<Vec<&str>>(),
-                    cx,
-                );
+                // explorer.confirm_delete が切ってあれば、確かめずにゴミ箱へ移す。
+                let confirm = settings::ActiveSettings::get(cx).explorer.confirm_delete;
+                let answer = confirm.then(|| {
+                    window.prompt(
+                        PromptLevel::Warning,
+                        &msg,
+                        Some(&detail),
+                        &answers.iter().map(|a| a.as_ref()).collect::<Vec<&str>>(),
+                        cx,
+                    )
+                });
                 cx.spawn_in(window, async move |this, cx| {
-                    if answer.await != Ok(0) {
+                    if let Some(answer) = answer
+                        && answer.await != Ok(0)
+                    {
                         return;
                     }
                     let r = this.update(cx, |_, cx| cx.remote().trash(&path)).ok();

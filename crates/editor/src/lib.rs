@@ -12,18 +12,25 @@ use find_panel::{FindPanel, FindPanelEvent};
 
 use std::path::{Path, PathBuf};
 
+use std::{ops::Range, rc::Rc, time::Duration};
+
 use gpui_kit::{
-    App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement,
-    KeyBinding, ParentElement, Render, SharedString, Styled, Subscription, Task, Window, actions,
+    AnyWindowHandle, App, AppContext as _, Context, Entity, EntityInputHandler as _, EventEmitter, FocusHandle,
+    Focusable, InteractiveElement as _, IntoElement, KeyBinding, ParentElement, Render, SharedString, Styled,
+    Subscription, Task, Window, actions,
     assets::IconName,
     component::{
         Icon, Sizable as _,
         dock::{BasePanel, Panel, PanelEvent},
         h_flex,
-        input::{Editor, EditorState, GoToDefinition, InputEvent, Position, Replace, Search, TabSize},
+        input::{
+            Editor, EditorState, GoToDefinition, InputEvent, Position, Replace, RopeExt as _, Search, TabSize,
+            WrappingIndent,
+        },
     },
-    div, px,
+    div, px, relative,
 };
+use settings::{AutoSave, CursorBlinking, Eol, RenderWhitespace};
 use theme::{Token, TokenColors as _};
 
 pub use file::{LineEnding, LoadError, Loaded};
@@ -54,6 +61,14 @@ pub fn language_for(path: &Path, cx: &App) -> String {
 }
 
 actions!(editor, [Save]);
+
+/// 保存の前の整形（`editor.format_on_save`）。言語サーバーを持つ Workspace が入れる。
+/// 返すのは置き換え（バイトの範囲と新しい文字列）。言語サーバーがなければ None。
+#[derive(Clone)]
+#[allow(clippy::type_complexity)]
+pub struct FormatOnSave(pub Rc<dyn Fn(&Path, &mut App) -> Option<Task<anyhow::Result<Vec<(Range<usize>, String)>>>>>);
+
+impl gpui_kit::Global for FormatOnSave {}
 
 const CONTEXT: &str = "EditorPanel";
 
@@ -94,12 +109,30 @@ pub struct EditorPanel {
     side: Vec<gpui_kit::AnyView>,
     /// 行番号の横の変更の印。
     quick_diff: quick_diff::QuickDiff,
+    /// 中身から推し量ったインデント（`editor.detect_indentation`）。設定より優先する。
+    detected_indent: Option<TabSize>,
+    /// 自動保存の待ち。
+    auto_save: Option<Task<()>>,
+    window: AnyWindowHandle,
     _subscriptions: Vec<Subscription>,
 }
 
 impl EditorPanel {
     pub fn new(path: PathBuf, loaded: Loaded, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let language: SharedString = language_for(&path, cx).into();
+        let detected_indent =
+            file::detect_indentation(&loaded.text).map(|(tab_size, hard_tabs)| TabSize { tab_size, hard_tabs });
+        // 改行のないファイル（新しいファイルなど）は、設定の改行コードにする。
+        let line_ending = if loaded.text.contains('\n') {
+            loaded.line_ending
+        } else {
+            match settings::ActiveSettings::get(cx).files.eol {
+                Eol::Lf => LineEnding::Lf,
+                Eol::Crlf => LineEnding::Crlf,
+                Eol::Auto if cfg!(windows) => LineEnding::Crlf,
+                Eol::Auto => LineEnding::Lf,
+            }
+        };
         let state = cx.new(|cx| {
             EditorState::new(window, cx)
                 .language(language.clone())
@@ -125,8 +158,12 @@ impl EditorPanel {
                         cx.notify();
                     }
                     cx.emit(EditorEvent::Changed);
+                    this.schedule_auto_save(cx);
                 }
                 InputEvent::Focus => cx.emit(EditorEvent::Activated),
+                InputEvent::Blur if settings::ActiveSettings::get(cx).files.auto_save == AutoSave::OnFocusChange => {
+                    this.save_if_dirty(cx);
+                }
                 _ => {}
             }),
             // カーソル移動も含め、エディタの状態が変わったらステータスバーへ伝える。
@@ -136,10 +173,10 @@ impl EditorPanel {
                 this.apply_settings(window, cx)
             }),
         ];
-        EditorPanel {
+        let mut this = EditorPanel {
             path,
             language,
-            line_ending: loaded.line_ending,
+            line_ending,
             state,
             focus: cx.focus_handle(),
             version: 0,
@@ -149,8 +186,13 @@ impl EditorPanel {
             edit_version: Default::default(),
             side: Vec::new(),
             quick_diff: Default::default(),
+            detected_indent,
+            auto_save: None,
+            window: window.window_handle(),
             _subscriptions: subs,
-        }
+        };
+        this.apply_settings(window, cx);
+        this
     }
 
     pub fn path(&self) -> &Path {
@@ -181,21 +223,64 @@ impl EditorPanel {
         self.state.read(cx).cursor_position()
     }
 
-    /// 保存する。Rope のスナップショット（O(1)）をバックグラウンドで書き出す。
+    /// 保存する。設定に従って整形・手直ししてから、Rope のスナップショット（O(1)）を書き出す。
     /// 返り値のタスクは保存が終わると完了する（未保存の確認ダイアログから待つため）。
     pub fn save(&mut self, cx: &mut Context<Self>) -> Task<Result<(), String>> {
-        let rope = self.state.read(cx).text().clone();
-        let version = self.version;
-        let path = self.path.clone();
-        let line_ending = self.line_ending;
+        let s = settings::ActiveSettings::get(cx);
+        let format = s
+            .editor
+            .format_on_save
+            .then(|| cx.try_global::<FormatOnSave>().cloned())
+            .flatten()
+            .and_then(|f| (f.0)(&self.path, cx));
+        let fixes = file::SaveFixes {
+            trim_trailing_whitespace: s.files.trim_trailing_whitespace,
+            insert_final_newline: s.files.insert_final_newline,
+            trim_final_newlines: s.files.trim_final_newlines,
+        };
         self.saving = true;
-        let client = cx.remote();
-        let write = cx.background_spawn(async move {
-            let bytes = file::encode(rope.chunks(), line_ending);
-            client.write_file(&path, bytes).await
-        });
+        self.auto_save = None;
+        let window = self.window;
         cx.spawn(async move |this, cx| {
-            let result = write.await.map_err(|e| e.to_string());
+            if let Some(format) = format {
+                match format.await {
+                    Ok(edits) if !edits.is_empty() => {
+                        cx.update_window(window, |_, window, cx| {
+                            this.update(cx, |this, cx| this.apply_edits(edits, window, cx)).ok();
+                        })
+                        .ok();
+                    }
+                    Ok(_) => {}
+                    // 整形できなくても保存はする。
+                    Err(e) => log::warn!("保存前の整形ができなかった: {e}"),
+                }
+            }
+            cx.update_window(window, |_, window, cx| {
+                this.update(cx, |this, cx| {
+                    let text = this.state.read(cx).value().to_string();
+                    let edits = file::save_fixes(&text, fixes);
+                    if !edits.is_empty() {
+                        this.apply_edits(edits, window, cx);
+                    }
+                })
+                .ok();
+            })
+            .ok();
+            let Ok((rope, version, path, line_ending, client)) = this.update(cx, |this, cx| {
+                (
+                    this.state.read(cx).text().clone(),
+                    this.version,
+                    this.path.clone(),
+                    this.line_ending,
+                    cx.remote(),
+                )
+            }) else {
+                return Err("closed".into());
+            };
+            let bytes = cx
+                .background_spawn(async move { file::encode(rope.chunks(), line_ending) })
+                .await;
+            let result = client.write_file(&path, bytes).await.map_err(|e| e.to_string());
             this.update(cx, |this, cx| {
                 this.saving = false;
                 match &result {
@@ -215,20 +300,84 @@ impl EditorPanel {
         })
     }
 
+    /// 未保存なら保存する（自動保存）。
+    pub fn save_if_dirty(&mut self, cx: &mut Context<Self>) {
+        if self.is_dirty() && !self.saving {
+            self.save(cx).detach();
+        }
+    }
+
+    /// `files.auto_save` が `after_delay` なら、最後の編集から少し待って保存する。
+    fn schedule_auto_save(&mut self, cx: &mut Context<Self>) {
+        let s = settings::ActiveSettings::get(cx);
+        if s.files.auto_save != AutoSave::AfterDelay {
+            return;
+        }
+        let delay = Duration::from_millis(s.files.auto_save_delay.max(100));
+        self.auto_save = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(delay).await;
+            this.update(cx, |this, cx| {
+                this.auto_save = None;
+                this.save_if_dirty(cx);
+            })
+            .ok();
+        }));
+    }
+
+    /// テキストを置き換える（範囲はバイト。後ろのものから順に並べて渡す）。カーソルの行と列は保つ。
+    pub fn apply_edits(&mut self, edits: Vec<(Range<usize>, String)>, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.update(cx, |state, cx| {
+            let cursor = state.cursor_position();
+            for (range, text) in edits {
+                let rope = state.text();
+                let start = rope.offset_to_offset_utf16(range.start.min(rope.len()));
+                let end = rope.offset_to_offset_utf16(range.end.min(rope.len()));
+                state.replace_text_in_range(Some(start..end), &text, window, cx);
+            }
+            state.set_cursor_position(cursor, window, cx);
+        });
+    }
+
     fn apply_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let s = settings::ActiveSettings::get(cx).editor.clone();
+        let tab = match self.detected_indent {
+            Some(t) if s.detect_indentation => t,
+            _ => TabSize {
+                tab_size: s.tab_size,
+                hard_tabs: s.hard_tabs,
+            },
+        };
         self.state.update(cx, |state, cx| {
-            state.set_tab_size(
-                TabSize {
-                    tab_size: s.tab_size,
-                    hard_tabs: s.hard_tabs,
+            state.set_tab_size(tab, cx);
+            state.set_soft_wrap(s.soft_wrap, window, cx);
+            state.set_wrapping_indent(
+                match s.wrapping_indent {
+                    settings::WrappingIndent::None => WrappingIndent::None,
+                    settings::WrappingIndent::Same => WrappingIndent::Same,
                 },
+                window,
                 cx,
             );
-            state.set_soft_wrap(s.soft_wrap, window, cx);
             state.set_line_number(s.line_numbers, window, cx);
             state.set_indent_guides(s.indent_guides, window, cx);
+            state.set_show_whitespaces(s.render_whitespace == RenderWhitespace::All, window, cx);
+            state.set_folding(s.folding, window, cx);
+            state.set_auto_close(s.auto_closing_brackets, window, cx);
+            state.set_smart_indent(s.auto_indent, window, cx);
+            state.set_scroll_beyond_last_line((!s.scroll_beyond_last_line).then_some(0), window, cx);
+            state.set_cursor_surrounding_lines(
+                (s.cursor_surrounding_lines > 0).then_some(s.cursor_surrounding_lines),
+                window,
+                cx,
+            );
+            state.set_active_line_only_when_focused(s.highlight_line_only_when_focused, window, cx);
         });
+        let blink = match s.cursor_blinking {
+            CursorBlinking::Blink => gpui_kit::component::input::CursorBlink::default(),
+            CursorBlinking::Solid => gpui_kit::component::input::CursorBlink::steady(),
+        };
+        gpui_kit::component::Theme::global_mut(cx).cursor_blink = blink;
+        cx.notify();
     }
 
     pub fn edit_version(&self) -> std::rc::Rc<std::cell::Cell<u64>> {
@@ -346,6 +495,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 impl Render for EditorPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _ = &self.focus;
+        let line_height = settings::ActiveSettings::get(cx).editor.line_height.clamp(1.0, 3.0);
         div()
             .key_context(CONTEXT)
             .on_action(cx.listener(|this, _: &Save, _, cx| this.save(cx).detach()))
@@ -372,11 +522,12 @@ impl Render for EditorPanel {
                     .flex()
                     .flex_row()
                     .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .h_full()
-                            .child(Editor::new(&self.state).bordered(false).h_full()),
+                        div().flex_1().min_w_0().h_full().child(
+                            Editor::new(&self.state)
+                                .bordered(false)
+                                .h_full()
+                                .line_height(relative(line_height)),
+                        ),
                     )
                     .children(self.side.iter().cloned()),
             )

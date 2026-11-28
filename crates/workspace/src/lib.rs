@@ -31,6 +31,7 @@ use std::{
 };
 
 use editor::{EditorEvent, EditorPanel, LoadError};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, AppContext as _, Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _, IntoElement,
     KeyBinding, ParentElement, PathPromptOptions, Render, SharedString, StatefulInteractiveElement as _, Styled,
@@ -227,7 +228,13 @@ impl Workspace {
             let outline = panel(PanelKind::Outline, cx);
             outline_handle = Some(outline.clone());
 
-            area.set_center(DockLayout::tabs().panel_view(welcome, cx), window, cx);
+            // workbench.startup_welcome: ようこそ画面を出すかどうか。
+            let center = if settings::ActiveSettings::get(cx).workbench.startup_welcome {
+                DockLayout::tabs().panel_view(welcome, cx)
+            } else {
+                DockLayout::tabs()
+            };
+            area.set_center(center, window, cx);
             area.set_dock(
                 DockPlacement::Left,
                 DockLayout::tabs().panel_view(project_handle, cx).panel_view(search, cx),
@@ -295,8 +302,18 @@ impl Workspace {
             if window.is_window_active() {
                 extension_host::WasmHost::broadcast(extension_host::WorkspaceEvent::WindowFocused, cx);
                 this.refresh_all_diff_bases(cx);
+            } else if settings::ActiveSettings::get(cx).files.auto_save == settings::AutoSave::OnFocusChange {
+                // ほかのウィンドウに移ったら、未保存のものを保存する（files.auto_save）。
+                for e in this.editors.values().filter_map(WeakEntity::upgrade) {
+                    e.update(cx, |e, cx| e.save_if_dirty(cx));
+                }
             }
         }));
+        // 保存の前の整形（editor.format_on_save）は、このワークスペースの言語サーバーに頼む。
+        let weak = cx.entity().downgrade();
+        cx.set_global(editor::FormatOnSave(std::rc::Rc::new(move |path, cx| {
+            weak.upgrade()?.read(cx).lsp_format(path, cx)
+        })));
         let this = cx.entity().downgrade();
         window.on_window_should_close(cx, move |window, cx| {
             this.update(cx, |ws, cx| ws.should_close_window(window, cx))
@@ -443,6 +460,11 @@ impl Workspace {
             cx.subscribe_in(&panel, window, move |this, panel, event, window, cx| match event {
                 EditorEvent::Activated => {
                     this.active = Some(panel.downgrade());
+                    // explorer.auto_reveal: ツリーでもそのファイルを選ぶ。
+                    if settings::ActiveSettings::get(cx).explorer.auto_reveal {
+                        let path = panel.read(cx).path().to_path_buf();
+                        this.project.update(cx, |p, cx| p.reveal(path, cx));
+                    }
                     cx.notify();
                 }
                 EditorEvent::Edited => {
@@ -834,6 +856,12 @@ fn language_label(name: &str) -> String {
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_extension_root(cx);
+        let s = settings::ActiveSettings::get(cx);
+        // window.zoom_level: 画面全体の大きさ（rem）を変える。
+        let rem = gpui_kit::px(16.0 * s.window.zoom());
+        if window.rem_size() != rem {
+            window.set_rem_size(rem);
+        }
         v_flex()
             .key_context(CONTEXT)
             .track_focus(&self.focus)
@@ -900,7 +928,7 @@ impl Render for Workspace {
             .font_family(cx.global::<theme::ActiveTheme>().resolved.fonts.ui.clone())
             .child(self.render_title_bar(window, cx))
             .child(div().flex_1().min_h_0().child(self.dock_area.clone()))
-            .child(self.render_status_bar(cx))
+            .when(s.workbench.status_bar, |d| d.child(self.render_status_bar(cx)))
             .children(self.render_palette(cx))
     }
 }

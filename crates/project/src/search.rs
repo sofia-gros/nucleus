@@ -19,6 +19,10 @@ pub struct SearchOptions {
     pub whole_word: bool,
     /// 対象のファイル（`,` 区切りの glob。`!` で除外）。空ならすべて。
     pub include: String,
+    /// 探さないもの（glob。設定の `files.exclude` と `search.exclude`）。
+    pub exclude: Vec<String>,
+    /// `.gitignore` などに書かれたものも探す（設定の `search.use_ignore_files` の逆）。
+    pub include_ignored: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -98,6 +98,24 @@ impl DocSync {
     }
 }
 
+/// 言語サーバーの位置を、テキストのバイト位置にする。
+fn lsp_offset(text: &Rope, p: Position, utf32: bool) -> usize {
+    if utf32 {
+        return text.position_to_offset(&p);
+    }
+    let line = text.slice_line(p.line as usize);
+    let mut units = 0usize;
+    let mut chars = 0u32;
+    for c in line.chars() {
+        if units >= p.character as usize {
+            break;
+        }
+        units += c.len_utf16();
+        chars += 1;
+    }
+    text.position_to_offset(&Position::new(p.line, chars))
+}
+
 /// コードポイント単位の位置を UTF-16 単位にする（UTF-16 しか話せないサーバー向け）。
 fn utf32_to_utf16(text: &Rope, p: Position) -> Position {
     let line = text.slice_line(p.line as usize);
@@ -329,6 +347,55 @@ impl Workspace {
         }));
     }
 
+    /// 保存の前の整形（`editor.format_on_save`）。言語サーバーが整形できなければ None。
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn lsp_format(
+        &self,
+        path: &Path,
+        cx: &App,
+    ) -> Option<Task<Result<Vec<(std::ops::Range<usize>, String)>>>> {
+        let doc = self.lsp.docs.get(path)?.clone();
+        let can_format = match &doc.server.capabilities.document_formatting_provider {
+            Some(lsp_types::OneOf::Left(b)) => *b,
+            Some(lsp_types::OneOf::Right(_)) => true,
+            None => false,
+        };
+        if !can_format {
+            return None;
+        }
+        let editor = self.editors.get(path)?.upgrade()?;
+        let rope = editor.read(cx).state().read(cx).text().clone();
+        doc.sync(&rope);
+        let s = settings::ActiveSettings::get(cx);
+        let params = lsp_types::DocumentFormattingParams {
+            text_document: TextDocumentIdentifier { uri: doc.uri.clone() },
+            options: lsp_types::FormattingOptions {
+                tab_size: s.editor.tab_size as u32,
+                insert_spaces: !s.editor.hard_tabs,
+                ..Default::default()
+            },
+            work_done_progress_params: Default::default(),
+        };
+        let server = doc.server.clone();
+        let utf32 = server.uses_utf32();
+        Some(cx.background_spawn(async move {
+            let edits = server
+                .request::<lsp_types::request::Formatting>(params)
+                .await?
+                .unwrap_or_default();
+            let mut out: Vec<_> = edits
+                .into_iter()
+                .map(|e| {
+                    let start = lsp_offset(&rope, e.range.start, utf32);
+                    let end = lsp_offset(&rope, e.range.end, utf32);
+                    (start..end, e.new_text)
+                })
+                .collect();
+            out.sort_by_key(|e| std::cmp::Reverse(e.0.start));
+            Ok(out)
+        }))
+    }
+
     pub(crate) fn lsp_saved(&mut self, path: &Path) {
         if let Some(doc) = self.lsp.docs.get(path) {
             doc.server
@@ -450,6 +517,9 @@ impl HoverProvider for LspHover {
         _: &mut Window,
         cx: &mut App,
     ) -> Task<Result<Option<lsp_types::Hover>>> {
+        if !settings::ActiveSettings::get(cx).editor.hover {
+            return Task::ready(Ok(None));
+        }
         self.doc.sync(text);
         let params = HoverParams {
             text_document_position_params: self.doc.text_position(text, offset),

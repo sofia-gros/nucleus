@@ -78,7 +78,7 @@ pub struct Spawned {
 }
 
 /// シェルを起動する。`cwd` はプロジェクトのルートなど。PTY の読み書きは専用スレッドで始まる。
-pub fn spawn(cwd: Option<PathBuf>) -> anyhow::Result<Spawned> {
+pub fn spawn(cwd: Option<PathBuf>, settings: &settings::TerminalSettings) -> anyhow::Result<Spawned> {
     let size = GridSize {
         cols: 80,
         lines: 24,
@@ -88,7 +88,7 @@ pub fn spawn(cwd: Option<PathBuf>) -> anyhow::Result<Spawned> {
     let (tx, events) = futures::channel::mpsc::unbounded();
     let listener = Listener(tx);
     let config = Config {
-        scrolling_history: 10_000,
+        scrolling_history: settings.scrollback.min(1_000_000),
         ..Config::default()
     };
     let term = Arc::new(FairMutex::new(Term::new(config, &size, listener.clone())));
@@ -97,7 +97,16 @@ pub fn spawn(cwd: Option<PathBuf>) -> anyhow::Result<Spawned> {
     env.insert("TERM".to_string(), "xterm-256color".to_string());
     env.insert("COLORTERM".to_string(), "truecolor".to_string());
     env.insert("TERM_PROGRAM".to_string(), "nucleus".to_string());
+    // terminal.shell: 決めてあればそのシェル、なければ OS の既定。
+    let shell = settings
+        .shell
+        .as_ref()
+        .filter(|s| !s.trim().is_empty())
+        .map(|program| tty::Shell::new(program.clone(), settings.shell_args.clone()));
+    // Windows では項目が多いので、残りは既定値にする。
+    #[allow(clippy::needless_update)]
     let options = tty::Options {
+        shell,
         working_directory: cwd,
         drain_on_exit: true,
         env,

@@ -35,7 +35,6 @@ use remote::RemoteExt as _;
 use theme::{Token, TokenColors as _};
 
 /// 一致の数の上限（これを超えたら止める）。
-const LIMIT: usize = 5000;
 const DEBOUNCE: Duration = Duration::from_millis(150);
 
 pub enum SearchPanelEvent {
@@ -149,12 +148,18 @@ impl SearchPanel {
     }
 
     fn options(&self, cx: &App) -> SearchOptions {
+        let s = settings::ActiveSettings::get(cx);
+        let query = self.query.read(cx).value().to_string();
+        // search.smart_case: 大文字を含むときだけ区別する。
+        let smart = s.search.smart_case && query.chars().any(char::is_uppercase);
         SearchOptions {
-            query: self.query.read(cx).value().to_string(),
+            query,
             regex: self.regex,
-            case_sensitive: self.case_sensitive,
+            case_sensitive: self.case_sensitive || smart,
             whole_word: self.whole_word,
             include: self.include.read(cx).value().to_string(),
+            exclude: s.files.exclude.iter().chain(&s.search.exclude).cloned().collect(),
+            include_ignored: !s.search.use_ignore_files,
         }
     }
 
@@ -181,7 +186,10 @@ impl SearchPanel {
             if cancel.load(Ordering::Relaxed) {
                 return;
             }
-            let Ok(search) = this.update(cx, |_, cx| cx.remote().search(&root, opts, LIMIT)) else {
+            let Ok(search) = this.update(cx, |_, cx| {
+                let limit = settings::ActiveSettings::get(cx).search.max_results.max(1);
+                cx.remote().search(&root, opts, limit)
+            }) else {
                 return;
             };
             let result = search.await.map_err(|e| e.message);

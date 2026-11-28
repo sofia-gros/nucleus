@@ -1,6 +1,7 @@
 //! 設定（docs/ARCHITECTURE.md §7）。既定値 → ユーザー → ワークスペースの順に重ねる。gpui に依存しない。
 
 mod jsonc;
+mod model;
 mod write;
 
 use std::path::{Path, PathBuf};
@@ -9,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub use jsonc::strip_comments;
+pub use model::*;
 pub use write::{set_in_text, set_value};
 
 /// 有効な設定（gpui の Global）。変更を受け取りたい側は `cx.observe_global::<ActiveSettings>` を使う。
@@ -22,70 +24,6 @@ impl ActiveSettings {
         cx.try_global::<ActiveSettings>()
             .map(|s| s.0.clone())
             .unwrap_or_default()
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Settings {
-    /// テーマの名前（例: "Nucleus One Dark" / "Nucleus One Light"）。
-    pub theme: String,
-    /// 表示言語（例: "en" / "ja"）。null なら OS の設定に従う。
-    pub language: Option<String>,
-    /// 起動時に前回のフォルダと開いていたファイルを復元する。
-    pub restore_session: bool,
-    pub editor: EditorSettings,
-    /// 追加のキーバインド（変更は再起動後に反映）。
-    pub keymap: Vec<KeymapEntry>,
-    /// 無効にする Extension の ID。
-    pub disabled_extensions: Vec<String>,
-    /// Extension の一覧（index.json）の場所。null なら公式（sofia-gros/nucleus-extensions）。
-    pub extensions_registry: Option<String>,
-    /// 起動時に Extension の更新を確かめる。
-    pub check_extension_updates: bool,
-    /// Extension ごとの設定（拡張機能の画面で変える）。`{ "<id>": { "<key>": 値 } }`
-    pub extension_settings: std::collections::BTreeMap<String, serde_json::Map<String, serde_json::Value>>,
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Settings {
-            theme: "Nucleus One Dark".into(),
-            language: None,
-            restore_session: true,
-            editor: EditorSettings::default(),
-            keymap: Vec::new(),
-            disabled_extensions: Vec::new(),
-            extensions_registry: None,
-            check_extension_updates: true,
-            extension_settings: Default::default(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct EditorSettings {
-    pub font_family: String,
-    pub font_size: f32,
-    pub tab_size: usize,
-    pub hard_tabs: bool,
-    pub soft_wrap: bool,
-    pub line_numbers: bool,
-    pub indent_guides: bool,
-}
-
-impl Default for EditorSettings {
-    fn default() -> Self {
-        EditorSettings {
-            font_family: "JetBrains Mono".into(),
-            font_size: 13.0,
-            tab_size: 4,
-            hard_tabs: false,
-            soft_wrap: false,
-            line_numbers: true,
-            indent_guides: true,
-        }
     }
 }
 
@@ -189,14 +127,17 @@ fn tidy(layer: &mut Value, defaults: &Value) -> Vec<String> {
             unknown.push(key);
         }
     }
-    if let (Some(Value::Object(le)), Some(Value::Object(de))) = (l.get_mut("editor"), d.get("editor")) {
-        le.retain(|k, _| {
-            let known = de.contains_key(k);
-            if !known {
-                unknown.push(format!("editor.{k}"));
-            }
-            known
-        });
+    // 項目の決まっているまとまり（editor、files など）の中も確かめる。
+    for group in GROUPS {
+        if let (Some(Value::Object(lg)), Some(Value::Object(dg))) = (l.get_mut(*group), d.get(*group)) {
+            lg.retain(|k, _| {
+                let known = dg.contains_key(k);
+                if !known {
+                    unknown.push(format!("{group}.{k}"));
+                }
+                known
+            });
+        }
     }
     unknown
 }

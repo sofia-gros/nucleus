@@ -75,7 +75,8 @@ impl TerminalView {
         if self.terminal.is_some() || self.error.is_some() {
             return;
         }
-        match crate::model::spawn(self.cwd.clone()) {
+        let settings = settings::ActiveSettings::get(cx).terminal.clone();
+        match crate::model::spawn(self.cwd.clone(), &settings) {
             Ok(spawned) => {
                 let terminal = cx.new(|cx| Terminal::new(spawned, cx));
                 self._subs.push(cx.observe(&terminal, |_, _, cx| cx.notify()));

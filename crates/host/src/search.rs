@@ -19,16 +19,30 @@ pub fn search(root: &Path, opts: &SearchOptions, limit: usize, cancel: &AtomicBo
     }
     let re = build_regex(opts)?;
     let mut walker = ignore::WalkBuilder::new(root);
-    walker.hidden(true).git_ignore(true).parents(true).require_git(false);
+    let respect = !opts.include_ignored;
+    walker
+        .hidden(true)
+        .git_ignore(respect)
+        .git_exclude(respect)
+        .ignore(respect)
+        .parents(respect)
+        .require_git(false);
     let globs: Vec<&str> = opts
         .include
         .split(',')
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .collect();
-    if !globs.is_empty() {
+    let excludes: Vec<String> = opts
+        .exclude
+        .iter()
+        .map(|g| g.trim())
+        .filter(|g| !g.is_empty())
+        .map(|g| format!("!{g}"))
+        .collect();
+    if !globs.is_empty() || !excludes.is_empty() {
         let mut ov = ignore::overrides::OverrideBuilder::new(root);
-        for g in &globs {
+        for g in globs.iter().copied().chain(excludes.iter().map(String::as_str)) {
             ov.add(g).map_err(|e| format!("`{g}`: {e}"))?;
         }
         walker.overrides(ov.build().map_err(|e| e.to_string())?);
@@ -118,5 +132,29 @@ mod tests {
         let res = search(r, &case, 1000, &cancel).unwrap();
         assert_eq!(res.total, 2);
         assert_eq!(res.files.len(), 1);
+
+        // 設定の除外と、.gitignore を無視する探し方。
+        let ex = SearchOptions {
+            exclude: vec!["**/*.txt".into()],
+            ..opts("is_dirty")
+        };
+        let files: Vec<String> = search(r, &ex, 1000, &cancel)
+            .unwrap()
+            .files
+            .into_iter()
+            .map(|f| f.rel)
+            .collect();
+        assert_eq!(files, vec!["src/a.rs"]);
+        let all = SearchOptions {
+            include_ignored: true,
+            ..opts("is_dirty")
+        };
+        let files: Vec<String> = search(r, &all, 1000, &cancel)
+            .unwrap()
+            .files
+            .into_iter()
+            .map(|f| f.rel)
+            .collect();
+        assert!(files.contains(&"target/c.rs".to_string()));
     }
 }

@@ -156,11 +156,14 @@ impl Workspace {
         };
         self.indexing = true;
         let list = cx.remote().list_files(&root);
+        let excludes = project::Excludes::new(&settings::ActiveSettings::get(cx).files.exclude);
         cx.spawn(async move |this, cx| {
-            let files = list.await.unwrap_or_else(|e| {
+            let mut files = list.await.unwrap_or_else(|e| {
                 log::warn!("ファイルの一覧を作れない: {e}");
                 Vec::new()
             });
+            // files.exclude に当たるものは出さない。
+            files.retain(|f| !excludes.is_excluded(f));
             this.update(cx, |this, cx| {
                 this.indexing = false;
                 this.file_index = Some(Arc::new(files));

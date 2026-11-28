@@ -115,15 +115,27 @@ impl Element for TerminalElement {
         cx: &mut App,
     ) -> Prepaint {
         let fonts = cx.global::<theme::ActiveTheme>().resolved.fonts.clone();
-        let font_size = px(fonts.mono_size);
-        let base_font = font(SharedString::from(fonts.mono.clone()));
+        let s = settings::ActiveSettings::get(cx);
+        // terminal.font_family / font_size が空なら、エディタと同じ。
+        let mono_size = match s.terminal.font_size {
+            Some(size) => size.clamp(6.0, 72.0) * s.window.zoom(),
+            None => fonts.mono_size,
+        };
+        let family = s
+            .terminal
+            .font_family
+            .clone()
+            .filter(|f| !f.trim().is_empty())
+            .unwrap_or_else(|| fonts.mono.clone());
+        let font_size = px(mono_size);
+        let base_font = font(SharedString::from(family));
         let font_id = window.text_system().resolve_font(&base_font);
         let cell_width = window
             .text_system()
             .advance(font_id, font_size, 'm')
             .map(|s| s.width)
             .unwrap_or(font_size * 0.6);
-        let line_height = px((fonts.mono_size * 1.5).round());
+        let line_height = px((mono_size * s.terminal.line_height.clamp(1.0, 3.0)).round());
         let cell = size(cell_width, line_height);
 
         let cols = ((bounds.size.width - px(PADDING * 2.)) / cell_width).floor().max(2.) as u16;
