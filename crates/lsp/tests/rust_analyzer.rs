@@ -7,11 +7,12 @@ use lsp::{LanguageServer, ServerConfig};
 
 #[test]
 fn talks_to_rust_analyzer() {
-    if std::process::Command::new("rust-analyzer")
+    // rustup の代理コマンドだけがあって本体が入っていないとき（CI など）は、失敗で終わる。
+    let installed = std::process::Command::new("rust-analyzer")
         .arg("--version")
         .output()
-        .is_err()
-    {
+        .is_ok_and(|o| o.status.success());
+    if !installed {
         eprintln!("rust-analyzer がないのでスキップ");
         return;
     }
