@@ -133,3 +133,19 @@ core-palette-current = 使用中
 ## 言語サーバー
 core-notify-lsp-failed = 言語サーバー { $server } を起動できませんでした: { $error }
 core-problems-none = 問題は見つかっていません。
+
+# プロジェクト検索
+core-command-project-search = プロジェクト内を検索
+core-search-placeholder = 検索
+core-search-replace-placeholder = 置換
+core-search-include-placeholder = 対象のファイル（例: src/**/*.rs）
+core-search-searching = 検索中…
+core-search-no-folder = フォルダを開くと検索できます。
+core-search-no-results = 見つかりませんでした。
+core-search-summary = { $files } 個のファイルに { $count } 件
+core-search-summary-truncated = { $files } 個のファイルに { $count } 件以上（最初の分だけ表示）
+core-search-regex = 正規表現
+core-search-whole-word = 単語単位
+core-search-replace-all = すべて置換
+core-search-confirm-replace = { $files } 個のファイルの { $count } 件を「{ $replacement }」に置き換えますか？
+core-search-replaced = { $files } 個のファイルの { $count } 件を置き換えました。

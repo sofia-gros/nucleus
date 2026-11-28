@@ -5727,6 +5727,7 @@ dependencies = [
  "ignore",
  "log",
  "notify",
+ "regex",
  "tempfile",
 ]
 

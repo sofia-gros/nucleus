@@ -3,6 +3,7 @@
 //! フォルダの中身は、ツリーで展開されたときにそのフォルダだけを読む（docs/ARCHITECTURE.md §7）。
 //! 読み込みは呼び出し側がバックグラウンドで [`read_dir`] を実行し、結果を [`ProjectTree::set_children`] で渡す。
 
+pub mod search;
 mod tree;
 mod watcher;
 

@@ -138,3 +138,40 @@ core-palette-current = current
 ## Language servers
 core-notify-lsp-failed = Could not start the language server { $server }: { $error }
 core-problems-none = No problems have been detected.
+
+# Project search
+core-command-project-search = Search in Project
+core-search-placeholder = Search
+core-search-replace-placeholder = Replace
+core-search-include-placeholder = Files to include (e.g. src/**/*.rs)
+core-search-searching = Searching…
+core-search-no-folder = Open a folder to search in it.
+core-search-no-results = No results.
+core-search-summary = { $count ->
+        [one] 1 result
+       *[other] { $count } results
+    } in { $files ->
+        [one] 1 file
+       *[other] { $files } files
+    }
+core-search-summary-truncated = More than { $count } results in { $files ->
+        [one] 1 file
+       *[other] { $files } files
+    } (showing the first ones)
+core-search-regex = Use Regular Expression
+core-search-whole-word = Match Whole Word
+core-search-replace-all = Replace All
+core-search-confirm-replace = Replace { $count ->
+        [one] 1 occurrence
+       *[other] { $count } occurrences
+    } in { $files ->
+        [one] 1 file
+       *[other] { $files } files
+    } with “{ $replacement }”?
+core-search-replaced = Replaced { $count ->
+        [one] 1 occurrence
+       *[other] { $count } occurrences
+    } in { $files ->
+        [one] 1 file
+       *[other] { $files } files
+    }.

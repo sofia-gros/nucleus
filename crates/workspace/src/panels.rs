@@ -18,7 +18,6 @@ use theme::{Token, TokenColors as _};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PanelKind {
-    Search,
     Welcome,
     Output,
     Outline,
@@ -27,7 +26,6 @@ pub enum PanelKind {
 impl PanelKind {
     fn id(self) -> &'static str {
         match self {
-            PanelKind::Search => "nucleus.search",
             PanelKind::Welcome => "nucleus.welcome",
             PanelKind::Output => "nucleus.output",
             PanelKind::Outline => "nucleus.outline",
@@ -36,7 +34,6 @@ impl PanelKind {
 
     fn title_key(self) -> &'static str {
         match self {
-            PanelKind::Search => "core.panel.search",
             PanelKind::Welcome => "core.welcome.tab",
             PanelKind::Output => "core.panel.output",
             PanelKind::Outline => "core.panel.outline",
@@ -45,7 +42,6 @@ impl PanelKind {
 
     fn icon(self) -> IconName {
         match self {
-            PanelKind::Search => IconName::Search,
             PanelKind::Welcome => IconName::Atom,
             PanelKind::Output => IconName::ScrollText,
             PanelKind::Outline => IconName::ListTree,

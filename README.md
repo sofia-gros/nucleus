@@ -46,6 +46,7 @@ cargo run -p nucleus -- path/to/project
 |---|---|
 | `Ctrl+Shift+P` / `F1` | コマンドパレット |
 | `Ctrl+P` | ファイルへ移動 |
+| `Ctrl+Shift+F` | プロジェクト全体を検索・置換 |
 | `Ctrl+O` | フォルダを開く |
 | `Ctrl+S` | 保存 |
 | `Ctrl+W` | タブを閉じる |

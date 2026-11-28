@@ -11,7 +11,9 @@ mod palette;
 mod panels;
 mod problems;
 mod project_panel;
+mod project_search;
 mod prompt;
+mod search_panel;
 mod session;
 mod settings_sync;
 
@@ -66,6 +68,7 @@ actions!(
         OpenWorkspaceSettings,
         NewTerminal,
         ToggleTerminal,
+        ProjectSearch,
     ]
 );
 
@@ -83,6 +86,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-shift-p", CommandPalette, Some(CONTEXT)),
         KeyBinding::new("f1", CommandPalette, Some(CONTEXT)),
         KeyBinding::new("ctrl-p", FindFile, Some(CONTEXT)),
+        KeyBinding::new("ctrl-shift-f", ProjectSearch, Some(CONTEXT)),
         KeyBinding::new("ctrl-w", CloseActiveEditor, Some(CONTEXT)),
         KeyBinding::new("ctrl-s", SaveActiveEditor, Some(CONTEXT)),
         KeyBinding::new("ctrl-,", OpenSettings, Some(CONTEXT)),
@@ -164,6 +168,7 @@ pub struct Workspace {
     pending_positions: HashMap<PathBuf, lsp_types::Position>,
     lsp: language_support::LanguageSupport,
     problems: Entity<problems::ProblemsPanel>,
+    search: Entity<search_panel::SearchPanel>,
     last_saved_session: Option<session::Session>,
     settings_watcher: Option<project::DirWatcher>,
     _settings_task: Option<Task<()>>,
@@ -178,13 +183,14 @@ impl Workspace {
         let mut skin_handle = None;
         let mut first_terminal = None;
         let mut outline_handle = None;
+        let search_panel = cx.new(|cx| search_panel::SearchPanel::new(window, cx));
         let problems_panel = cx.new(problems::ProblemsPanel::new);
         let problems_handle = panel_handle(problems_panel.clone());
         let dock_area = cx.new(|cx| {
             let skin = DockSkin::new(cx);
             skin_handle = Some(skin.clone());
             let mut area = DockArea::new("nucleus.workspace", Some(1), window, cx).with_renderer(skin);
-            let search = panel(PanelKind::Search, cx);
+            let search = panel_handle(search_panel.clone());
             let welcome = panel(PanelKind::Welcome, cx);
             let terminal_view = cx.new(|cx| terminal::TerminalView::new(None, cx));
             first_terminal = Some(terminal_view.downgrade());
@@ -239,6 +245,9 @@ impl Workspace {
                 this.on_extensions_loaded(window, cx);
             }),
         );
+        subs.push(cx.subscribe_in(&search_panel, window, |this, _, e, window, cx| {
+            this.on_search_event(e, window, cx)
+        }));
         subs.push(cx.subscribe_in(
             &problems_panel,
             window,
@@ -282,6 +291,7 @@ impl Workspace {
             pending_positions: HashMap::new(),
             lsp: Default::default(),
             problems: problems_panel,
+            search: search_panel,
             last_saved_session: None,
             settings_watcher: None,
             _settings_task: None,
@@ -298,6 +308,8 @@ impl Workspace {
             }
             self.file_index = None;
             self.sync_extension_root(cx);
+            let root = self.project.read(cx).root();
+            self.search.update(cx, |s, cx| s.set_root(root, cx));
             extension_host::WasmHost::broadcast(
                 extension_host::WorkspaceEvent::RootChanged(Some(path.display().to_string())),
                 cx,
@@ -755,6 +767,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| this.open_user_settings(window, cx)))
             .on_action(cx.listener(|this, _: &NewTerminal, window, cx| this.new_terminal(window, cx)))
             .on_action(cx.listener(|this, _: &ToggleTerminal, window, cx| this.toggle_terminal(window, cx)))
+            .on_action(cx.listener(|this, _: &ProjectSearch, window, cx| this.open_project_search(window, cx)))
             .on_action(
                 cx.listener(|this, a: &extension_bridge::RunExtensionCommand, window, cx| {
                     this.run_extension_command(a, window, cx)

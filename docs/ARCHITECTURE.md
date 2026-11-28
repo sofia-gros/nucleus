@@ -306,4 +306,5 @@ l10n: l10n/                  # l10n/core.ftl, l10n/anthropic.claude.ftl …
    - ホスト関数 `open-file(path, line)` を追加（ワークスペース内だけ）。
    - 公式の Git Extension `extensions/nucleus.git`（ソースは `extensions-src/git`、権限は `ui: [panel.right]` と `process: [git]` だけ）: 変更の一覧（未ステージ / ステージ済み、M・A・D・R・U の印）、ファイルごと・まとめてのステージと取り消し、コミット（`Ctrl+Enter`、1行目の文字数表示）、Push / Fetch、ファイルを開く、空のフォルダでの `git init`。コマンド `Git: Refresh` / `Git: Stage All Changes` / `Git: Commit Staged Changes`。
    - 未対応: ガター（行ごとの変更の印、`editor: [decorate]`）とプロジェクトツリーの変更の印、差分表示（P7）、`tabs` / `markdown` / `code` / `canvas` などの要素、ステータスバー・タイトルバーのスロット、Extension の文言の多言語化（Git の画面は英語のみ）、描き直しの差分パッチ。
-8. **P7 仕上げ:** プロジェクト全体検索、Diff、拡張機能の管理画面、Light テーマの調整
+8. **P7 仕上げ:** プロジェクト全体検索、Diff、拡張機能の管理画面、Light テーマの調整 — **進行中**
+   - プロジェクト全体の検索と置換（左ドックの Search、`Ctrl+Shift+F`）: `.gitignore` に従って辿り、正規表現・大文字小文字・単語単位・対象のファイル（glob、`!` で除外）を切り替えられる。入力のたびに前の検索を取り消してバックグラウンドで探す（5,000 件まで、2MB を超えるファイルとバイナリは飛ばす）。結果はファイルごとにまとめ、見えている行だけを描く。行をクリックするとその位置を開く。すべて置換は確認してから行い、開いているファイルはエディタの中で（元に戻せる）、それ以外はディスク上で置き換える。正規表現では `$1` が使える。
