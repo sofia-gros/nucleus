@@ -1,4 +1,5 @@
 //! 組み込みの Word Tools（WASM）を実際に動かして、ホスト関数と権限の確認を試す。
+#![allow(clippy::disallowed_methods)] // テストでは git などを直接動かしてよい
 
 use std::sync::{Arc, Mutex};
 

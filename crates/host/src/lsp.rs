@@ -3,7 +3,7 @@
 
 use std::{
     io::BufReader,
-    process::{Child, Command, Stdio},
+    process::{Child, Stdio},
     sync::{Arc, Mutex, mpsc},
 };
 
@@ -25,18 +25,12 @@ impl HostServer {
         cwd: &str,
         emit: impl Fn(Event) + Send + 'static,
     ) -> std::io::Result<HostServer> {
-        let mut cmd = Command::new(command);
+        let mut cmd = background::command(command);
         cmd.args(args)
             .current_dir(cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt as _;
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-            cmd.creation_flags(CREATE_NO_WINDOW);
-        }
         let mut child = cmd.spawn()?;
         let missing = || std::io::Error::other("pipe missing");
         let mut stdin = child.stdin.take().ok_or_else(missing)?;

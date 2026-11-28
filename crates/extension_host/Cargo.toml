@@ -19,6 +19,7 @@ rust-embed = "8"
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true
 futures.workspace = true
+background.workspace = true
 ureq.workspace = true
 sha2.workspace = true
 tar.workspace = true

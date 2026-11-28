@@ -1,0 +1,11 @@
+[package]
+name = "background"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# 外のプログラムを、画面を出さずに（バックグラウンドで）起動するための入口。
+
+[lints]
+workspace = true

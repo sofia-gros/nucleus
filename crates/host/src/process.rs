@@ -1,14 +1,11 @@
 //! プログラムを動かす（git など）。終わるまで待って、出力をまとめて返す。
 
-use std::{
-    io::Write as _,
-    process::{Command, Stdio},
-};
+use std::{io::Write as _, process::Stdio};
 
 use remote::{ProcessOutput, ProcessSpec};
 
 pub fn run(spec: ProcessSpec) -> std::io::Result<ProcessOutput> {
-    let mut cmd = Command::new(&spec.program);
+    let mut cmd = background::command(&spec.program);
     cmd.args(&spec.args)
         .envs(spec.env.iter().map(|(k, v)| (k, v)))
         .stdin(if spec.stdin.is_some() {
@@ -20,13 +17,6 @@ pub fn run(spec: ProcessSpec) -> std::io::Result<ProcessOutput> {
         .stderr(Stdio::piped());
     if let Some(cwd) = &spec.cwd {
         cmd.current_dir(cwd);
-    }
-    // Windows では、黒いコンソール画面を出さない。
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt as _;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
     }
     let mut child = cmd.spawn()?;
     if let Some(input) = spec.stdin

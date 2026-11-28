@@ -50,6 +50,7 @@ terminal = { path = "crates/terminal" }
 extension_host = { path = "crates/extension_host" }
 lsp = { path = "crates/lsp" }
 remote = { path = "crates/remote" }
+background = { path = "crates/background" }
 host = { path = "crates/host" }
 wasmtime = { version = "51", default-features = false, features = ["component-model", "cranelift", "runtime", "std", "parallel-compilation", "cache", "addr2line"] }
 wasmtime-wasi = "51"

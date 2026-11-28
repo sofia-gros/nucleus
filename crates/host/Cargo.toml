@@ -17,6 +17,7 @@ notify.workspace = true
 trash.workspace = true
 project.workspace = true
 remote.workspace = true
+background.workspace = true
 alacritty_terminal = "0.26"
 
 [dev-dependencies]

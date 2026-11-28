@@ -32,10 +32,12 @@ mod bindings {
     });
 }
 
-/// ui@1 の型（Extension が返す要素の木など）。
-pub use bindings::nucleus::extension::events::WorkspaceEvent;
 use bindings::nucleus::extension::host::{self, Document, LogLevel, NotificationLevel, ProcessOutput};
-pub use bindings::nucleus::extension::ui;
+/// WIT が作った ui@1 の型（ホストの中だけで使い、外へは crate::ui の型にして渡す）。
+use bindings::nucleus::extension::{events as wit_events, ui as wit_ui};
+
+pub use crate::api::{ActiveDocument, EditorViewInfo, FileState, NoticeLevel, UiRequest};
+pub use crate::ui::{self, WorkspaceEvent};
 
 /// 1回の呼び出し（activate / run-command）に使える時間。
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(5);
@@ -45,94 +47,6 @@ pub const MEMORY_LIMIT: usize = 64 << 20;
 const TICK: Duration = Duration::from_millis(50);
 /// `run-process` の出力の上限（それぞれ）。
 const PROCESS_OUTPUT_LIMIT: usize = 4 << 20;
-
-/// UI スレッドにお願いすること。workspace が受け取って処理する。
-pub enum UiRequest {
-    Notify {
-        extension: String,
-        level: NoticeLevel,
-        message: String,
-    },
-    ActiveDocument {
-        reply: oneshot::Sender<Option<ActiveDocument>>,
-    },
-    ReplaceActiveText {
-        text: String,
-        reply: oneshot::Sender<Result<(), String>>,
-    },
-    /// ワークスペース内のファイルを開く（絶対パス）。
-    OpenFile {
-        path: PathBuf,
-        line: Option<u32>,
-    },
-    /// エディタの表示の状態。
-    EditorView {
-        editor: u32,
-        reply: oneshot::Sender<Option<EditorViewInfo>>,
-    },
-    EditorText {
-        editor: u32,
-        reply: oneshot::Sender<Option<String>>,
-    },
-    ScrollEditor {
-        editor: u32,
-        line: u32,
-    },
-    /// プロジェクトツリーの印を置き換える（この Extension の分、絶対パス）。
-    DecorateFiles {
-        extension: String,
-        marks: Vec<(PathBuf, FileState)>,
-    },
-    /// 差分を開く（すでに開いていれば元を新しくする）。
-    ShowDiff {
-        extension: String,
-        path: PathBuf,
-        rel: String,
-        base: String,
-        base_label: String,
-    },
-    /// Extension の状態が変わった。そのビューを描き直す。
-    Invalidate {
-        extension: String,
-    },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NoticeLevel {
-    Info,
-    Warning,
-    Error,
-}
-
-/// プロジェクトツリーに出すファイルの状態。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum FileState {
-    Modified,
-    Added,
-    Untracked,
-    Deleted,
-    Renamed,
-    Conflicted,
-    Ignored,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct EditorViewInfo {
-    pub version: u64,
-    pub first_line: u32,
-    pub last_line: u32,
-    pub line_count: u32,
-    pub cursor_line: u32,
-    pub height: f32,
-}
-
-#[derive(Clone, Debug)]
-pub struct ActiveDocument {
-    /// ワークスペースからの相対パス（ワークスペースの外なら絶対パス）。
-    pub path: String,
-    pub language: String,
-    pub text: String,
-}
 
 /// UI 側とのつながり。ExtensionStore が1つ持つ。
 #[derive(Clone)]
@@ -400,6 +314,7 @@ impl Instance {
                         .bindings
                         .call_render(&mut self.store, &view)
                         .map_err(trap_message)
+                        .map(|nodes| nodes.into_iter().map(convert::node).collect::<Vec<_>>())
                         .and_then(|nodes| validate_tree(&nodes).map(|_| nodes))
                         .map(|nodes| Rendered {
                             nodes,
@@ -415,12 +330,14 @@ impl Instance {
                     event,
                     reply,
                 } => {
+                    let event = convert::ui_event(event);
                     let r = flat(self.bindings.call_handle_ui_event(&mut self.store, &view, &key, &event));
                     let trap = trapped(&r);
                     let _ = reply.send(r);
                     (trap, true)
                 }
                 Call::Workspace(event) => {
+                    let event = convert::workspace_event(event);
                     let r = self
                         .bindings
                         .call_on_event(&mut self.store, &event)
@@ -457,29 +374,169 @@ fn trapped<T>(r: &Result<T, String>) -> bool {
     r.as_ref().is_err_and(|e| e.starts_with(TRAP_PREFIX))
 }
 
-/// 要素の木の上限。
-const MAX_NODES: usize = 10_000;
+pub use crate::ui::validate_tree;
 
-/// 要素の木が正しいか（添字が範囲内、親が1つ、循環しない）。
-pub fn validate_tree(nodes: &[ui::Node]) -> Result<(), String> {
-    if nodes.is_empty() {
-        return Err("要素の木が空".into());
-    }
-    if nodes.len() > MAX_NODES {
-        return Err(format!("要素が多すぎる（{MAX_NODES} まで）"));
-    }
-    let mut seen = vec![false; nodes.len()];
-    seen[0] = true;
-    for (i, n) in nodes.iter().enumerate() {
-        for &c in &n.children {
-            let c = c as usize;
-            if c >= nodes.len() || c <= i || seen[c] {
-                return Err(format!("要素 {i} の子 {c} が正しくない"));
-            }
-            seen[c] = true;
+/// WIT の型と crate::ui の型の入れ替え。
+mod convert {
+    use super::{ui, wit_events, wit_ui};
+
+    fn tone(t: wit_ui::Tone) -> ui::Tone {
+        match t {
+            wit_ui::Tone::Default => ui::Tone::Default,
+            wit_ui::Tone::Muted => ui::Tone::Muted,
+            wit_ui::Tone::Accent => ui::Tone::Accent,
+            wit_ui::Tone::Success => ui::Tone::Success,
+            wit_ui::Tone::Warning => ui::Tone::Warning,
+            wit_ui::Tone::Danger => ui::Tone::Danger,
+            wit_ui::Tone::Info => ui::Tone::Info,
         }
     }
-    Ok(())
+
+    fn size(s: wit_ui::Size) -> ui::Size {
+        match s {
+            wit_ui::Size::None => ui::Size::None,
+            wit_ui::Size::Xs => ui::Size::Xs,
+            wit_ui::Size::Sm => ui::Size::Sm,
+            wit_ui::Size::Md => ui::Size::Md,
+            wit_ui::Size::Lg => ui::Size::Lg,
+        }
+    }
+
+    fn button(b: wit_ui::ButtonProps) -> ui::ButtonProps {
+        ui::ButtonProps {
+            key: b.key,
+            label: b.label,
+            icon: b.icon,
+            style: match b.style {
+                wit_ui::ButtonVariant::Primary => ui::ButtonVariant::Primary,
+                wit_ui::ButtonVariant::Secondary => ui::ButtonVariant::Secondary,
+                wit_ui::ButtonVariant::Ghost => ui::ButtonVariant::Ghost,
+                wit_ui::ButtonVariant::Danger => ui::ButtonVariant::Danger,
+            },
+            disabled: b.disabled,
+            tooltip: b.tooltip,
+        }
+    }
+
+    pub fn node(n: wit_ui::Node) -> ui::Node {
+        use wit_ui::Kind as W;
+        let kind = match n.kind {
+            W::Stack(p) => ui::Kind::Stack(ui::StackProps {
+                direction: match p.direction {
+                    wit_ui::Direction::Horizontal => ui::Direction::Horizontal,
+                    wit_ui::Direction::Vertical => ui::Direction::Vertical,
+                },
+                gap: size(p.gap),
+                padding: size(p.padding),
+                grow: p.grow,
+                spread: p.spread,
+            }),
+            W::Scroll => ui::Kind::Scroll,
+            W::Text(p) => ui::Kind::Text(ui::TextProps {
+                content: p.content,
+                tone: tone(p.tone),
+                size: size(p.size),
+                bold: p.bold,
+                mono: p.mono,
+            }),
+            W::Icon(p) => ui::Kind::Icon(ui::IconProps {
+                name: p.name,
+                tone: tone(p.tone),
+            }),
+            W::Button(p) => ui::Kind::Button(button(p)),
+            W::Input(p) => ui::Kind::Input(ui::InputProps {
+                key: p.key,
+                placeholder: p.placeholder,
+                value: p.value,
+                revision: p.revision,
+                multiline: p.multiline,
+            }),
+            W::ListItem(p) => ui::Kind::ListItem(ui::ListItemProps {
+                key: p.key,
+                label: p.label,
+                detail: p.detail,
+                icon: p.icon,
+                icon_tone: tone(p.icon_tone),
+                badge: p.badge,
+                badge_tone: tone(p.badge_tone),
+                selected: p.selected,
+                actions: p.actions.into_iter().map(button).collect(),
+            }),
+            W::Section(p) => ui::Kind::Section(ui::SectionProps {
+                key: p.key,
+                title: p.title,
+                count: p.count,
+                collapsed: p.collapsed,
+                actions: p.actions.into_iter().map(button).collect(),
+            }),
+            W::Divider => ui::Kind::Divider,
+            W::Skeleton => ui::Kind::Skeleton,
+            W::Canvas(p) => ui::Kind::Canvas(ui::CanvasProps {
+                key: p.key,
+                width: p.width,
+                rects: p
+                    .rects
+                    .into_iter()
+                    .map(|r| ui::DrawRect {
+                        x: r.x,
+                        y: r.y,
+                        width: r.width,
+                        height: r.height,
+                        color: r.color,
+                        alpha: r.alpha,
+                    })
+                    .collect(),
+            }),
+        };
+        ui::Node {
+            kind,
+            children: n.children,
+        }
+    }
+
+    pub fn text_line(l: wit_ui::TextLine) -> ui::TextLine {
+        ui::TextLine {
+            x: l.x,
+            y: l.y,
+            size: l.size,
+            alpha: l.alpha,
+            spans: l
+                .spans
+                .into_iter()
+                .map(|s| ui::TextSpan {
+                    text: s.text,
+                    color: s.color,
+                })
+                .collect(),
+        }
+    }
+
+    pub fn ui_event(e: ui::UiEvent) -> wit_ui::UiEvent {
+        match e {
+            ui::UiEvent::Click => wit_ui::UiEvent::Click,
+            ui::UiEvent::Submit(s) => wit_ui::UiEvent::Submit(s),
+            ui::UiEvent::Change(s) => wit_ui::UiEvent::Change(s),
+            ui::UiEvent::Toggle(b) => wit_ui::UiEvent::Toggle(b),
+            ui::UiEvent::Pointer(p) => wit_ui::UiEvent::Pointer(wit_ui::PointerEvent {
+                kind: match p.kind {
+                    ui::PointerKind::Down => wit_ui::PointerKind::Down,
+                    ui::PointerKind::Drag => wit_ui::PointerKind::Drag,
+                    ui::PointerKind::Up => wit_ui::PointerKind::Up,
+                },
+                x: p.x,
+                y: p.y,
+                height: p.height,
+            }),
+        }
+    }
+
+    pub fn workspace_event(e: ui::WorkspaceEvent) -> wit_events::WorkspaceEvent {
+        match e {
+            ui::WorkspaceEvent::RootChanged(r) => wit_events::WorkspaceEvent::RootChanged(r),
+            ui::WorkspaceEvent::FileSaved(p) => wit_events::WorkspaceEvent::FileSaved(p),
+            ui::WorkspaceEvent::WindowFocused => wit_events::WorkspaceEvent::WindowFocused,
+        }
+    }
 }
 
 const TRAP_PREFIX: &str = "停止: ";
@@ -557,8 +614,9 @@ pub fn confine(root: &Path, path: &str) -> Result<PathBuf, String> {
 /// 1回の `render` で足せる文字の行の上限。
 const MAX_TEXT_LINES: usize = 4000;
 
-impl ui::Host for State {
-    fn canvas_text(&mut self, canvas_key: String, lines: Vec<ui::TextLine>) {
+impl wit_ui::Host for State {
+    fn canvas_text(&mut self, canvas_key: String, lines: Vec<wit_ui::TextLine>) {
+        let lines: Vec<ui::TextLine> = lines.into_iter().map(convert::text_line).collect();
         let total: usize = self.canvas_texts.values().map(Vec::len).sum();
         let room = MAX_TEXT_LINES.saturating_sub(total);
         self.canvas_texts
@@ -739,7 +797,7 @@ impl State {
         }
         self.require("process", &command)?;
         use std::process::Stdio;
-        let mut cmd = std::process::Command::new(&command);
+        let mut cmd = background::command(&command);
         cmd.args(&args)
             .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() })
             .stdout(Stdio::piped())

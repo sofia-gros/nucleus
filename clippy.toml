@@ -1,5 +1,6 @@
 # 色は必ず theme::Token（テーマ変数）から取る。直書きできるのは theme クレートだけ。
 disallowed-methods = [
+  { path = "std::process::Command::new", reason = "background::command を使う（Windows で画面を出さないため）" },
   { path = "gpui::rgb", reason = "色は theme::Token から取る（cx.token(Token::…)）" },
   { path = "gpui::rgba", reason = "色は theme::Token から取る（cx.token(Token::…)）" },
   { path = "gpui::hsla", reason = "色は theme::Token から取る（cx.token(Token::…)）" },

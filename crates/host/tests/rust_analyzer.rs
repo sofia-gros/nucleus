@@ -1,5 +1,6 @@
 //! 実物の rust-analyzer と、ホスト（host::local）越しに初期化して、診断の通知が届くかを確かめる
 //! （rust-analyzer がなければスキップ）。
+#![allow(clippy::disallowed_methods)] // テストでは git などを直接動かしてよい
 
 use std::time::Duration;
 

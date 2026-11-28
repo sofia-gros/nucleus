@@ -1,4 +1,5 @@
 //! 1つの塊だけのパッチが `git apply --cached` で当たることを、本物の git で確かめる。
+#![allow(clippy::disallowed_methods)] // テストでは git などを直接動かしてよい
 
 use std::{io::Write as _, process::Command};
 
