@@ -1,0 +1,24 @@
+[package]
+name = "remote"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# 画面（UI）とホスト（ファイル・プロセス・拡張機能などを実際に扱う側）のあいだの取り決めと、UI 側の窓口。
+# ブラウザ版（wasm32-unknown-unknown）でもビルドできるように、OS に依存するものは入れない。
+
+[dependencies]
+serde.workspace = true
+postcard.workspace = true
+futures.workspace = true
+log.workspace = true
+project.workspace = true
+gpui-kit = { workspace = true, optional = true }
+
+[features]
+# gpui のアプリから使うための入れ物（cx.remote()）。
+gpui = ["dep:gpui-kit"]
+
+[lints]
+workspace = true

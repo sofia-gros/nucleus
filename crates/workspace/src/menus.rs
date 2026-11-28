@@ -20,6 +20,7 @@ use gpui_kit::{
     div,
 };
 use i18n::Translate as _;
+use remote::RemoteExt as _;
 use serde::Deserialize;
 use theme::{Token, TokenColors as _};
 
@@ -212,10 +213,13 @@ impl Workspace {
         let rx = cx.prompt_for_new_path(&dir, Some("untitled.txt"));
         cx.spawn_in(window, async move |this, cx| {
             let Ok(Ok(Some(path))) = rx.await else { return };
-            let created = if path.exists() {
-                Ok(())
-            } else {
-                std::fs::write(&path, "")
+            let Ok(create) = this.update(cx, |_, cx| cx.remote().create_file(&path)) else {
+                return;
+            };
+            // 上書きの確認は保存先を選ぶダイアログが済ませている。すでにあればそのまま開く。
+            let created = match create.await {
+                Err(e) if e.kind == remote::ErrorKind::AlreadyExists => Ok(()),
+                r => r,
             };
             this.update_in(cx, |this, window, cx| match created {
                 Ok(()) => this.open_path(path, window, cx),

@@ -17,6 +17,7 @@ use gpui_kit::{
     px,
 };
 use i18n::Translate as _;
+use remote::RemoteExt as _;
 use theme::{Token, TokenColors as _};
 
 use crate::{Workspace, commands, finder};
@@ -154,9 +155,12 @@ impl Workspace {
             return;
         };
         self.indexing = true;
-        let list = cx.background_spawn(async move { finder::list_files(&root) });
+        let list = cx.remote().list_files(&root);
         cx.spawn(async move |this, cx| {
-            let files = list.await;
+            let files = list.await.unwrap_or_else(|e| {
+                log::warn!("ファイルの一覧を作れない: {e}");
+                Vec::new()
+            });
             this.update(cx, |this, cx| {
                 this.indexing = false;
                 this.file_index = Some(Arc::new(files));

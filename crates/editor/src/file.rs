@@ -1,10 +1,6 @@
-//! ファイルの読み書き。どちらもバックグラウンドで呼ぶこと。
+//! ファイルの中身とテキストの変換。読み書きそのものはホストが行う（remote::Client）。
 
-use std::{
-    fs,
-    io::{self, Write as _},
-    path::Path,
-};
+use std::{io, path::Path};
 
 /// これより大きいファイルは開かない（エディタの応答性を守るため）。
 pub const MAX_FILE_SIZE: u64 = 32 * 1024 * 1024;
@@ -50,12 +46,19 @@ pub struct Loaded {
     pub line_ending: LineEnding,
 }
 
-pub fn load(path: &Path) -> Result<Loaded, LoadError> {
-    let meta = fs::metadata(path).map_err(LoadError::Io)?;
-    if meta.len() > MAX_FILE_SIZE {
-        return Err(LoadError::TooLarge(meta.len()));
-    }
-    let bytes = fs::read(path).map_err(LoadError::Io)?;
+/// ホストから読み込んでテキストにする。
+pub async fn load(client: remote::Client, path: std::path::PathBuf) -> Result<Loaded, LoadError> {
+    let bytes = client.read_file(&path, MAX_FILE_SIZE).await.map_err(|e| match e.kind {
+        remote::ErrorKind::TooLarge(n) => LoadError::TooLarge(n),
+        kind => {
+            let io_kind = match kind {
+                remote::ErrorKind::NotFound => io::ErrorKind::NotFound,
+                remote::ErrorKind::PermissionDenied => io::ErrorKind::PermissionDenied,
+                _ => io::ErrorKind::Other,
+            };
+            LoadError::Io(io::Error::new(io_kind, e.message))
+        }
+    })?;
     decode(bytes)
 }
 
@@ -78,42 +81,24 @@ pub fn decode(bytes: Vec<u8>) -> Result<Loaded, LoadError> {
     Ok(Loaded { text, line_ending })
 }
 
-/// 一時ファイルに書いてから置き換える（途中で失敗しても元のファイルを壊さない）。
-pub fn save<'a>(path: &Path, chunks: impl Iterator<Item = &'a str>, line_ending: LineEnding) -> io::Result<()> {
-    let dir = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let tmp = dir.join(format!(".{name}.nucleus-save"));
-    {
-        let mut out = io::BufWriter::new(fs::File::create(&tmp)?);
-        for chunk in chunks {
-            match line_ending {
-                LineEnding::Lf => out.write_all(chunk.as_bytes())?,
-                LineEnding::Crlf => {
-                    let mut rest = chunk;
-                    while let Some(i) = rest.find('\n') {
-                        out.write_all(&rest.as_bytes()[..i])?;
-                        out.write_all(b"\r\n")?;
-                        rest = &rest[i + 1..];
-                    }
-                    out.write_all(rest.as_bytes())?;
+/// 保存するバイト列にする（改行を `line_ending` にそろえる）。書き出しはホストが行う。
+pub fn encode<'a>(chunks: impl Iterator<Item = &'a str>, line_ending: LineEnding) -> Vec<u8> {
+    let mut out = Vec::new();
+    for chunk in chunks {
+        match line_ending {
+            LineEnding::Lf => out.extend_from_slice(chunk.as_bytes()),
+            LineEnding::Crlf => {
+                let mut rest = chunk;
+                while let Some(i) = rest.find('\n') {
+                    out.extend_from_slice(&rest.as_bytes()[..i]);
+                    out.extend_from_slice(b"\r\n");
+                    rest = &rest[i + 1..];
                 }
+                out.extend_from_slice(rest.as_bytes());
             }
         }
-        let file = out.into_inner().map_err(|e| e.into_error())?;
-        file.sync_all()?;
     }
-    if let Ok(meta) = fs::metadata(path) {
-        let _ = fs::set_permissions(&tmp, meta.permissions());
-    }
-    fs::rename(&tmp, path).inspect_err(|_| {
-        let _ = fs::remove_file(&tmp);
-    })
+    out
 }
 
 /// ファイル名から gpui-kit の言語名を決める（tree-sitter の文法の名前）。
@@ -178,25 +163,17 @@ mod tests {
     }
 
     #[test]
-    fn saves_atomically_with_the_original_line_ending() {
-        let d = tempfile::tempdir().unwrap();
-        let p = d.path().join("a.txt");
-        fs::write(&p, "old").unwrap();
-        save(&p, ["one\ntw", "o\n"].into_iter(), LineEnding::Crlf).unwrap();
-        assert_eq!(fs::read(&p).unwrap(), b"one\r\ntwo\r\n");
-        save(&p, ["x\ny"].into_iter(), LineEnding::Lf).unwrap();
-        assert_eq!(fs::read_to_string(&p).unwrap(), "x\ny");
-        assert_eq!(fs::read_dir(d.path()).unwrap().count(), 1, "no temp file left behind");
-    }
-
-    #[test]
-    fn round_trips_through_load() {
-        let d = tempfile::tempdir().unwrap();
-        let p = d.path().join("w.rs");
-        fs::write(&p, "fn main() {}\r\n").unwrap();
-        let l = load(&p).unwrap();
-        save(&p, [l.text.as_str()].into_iter(), l.line_ending).unwrap();
-        assert_eq!(fs::read(&p).unwrap(), b"fn main() {}\r\n");
+    fn encodes_with_the_original_line_ending() {
+        assert_eq!(
+            encode(["one\ntw", "o\n"].into_iter(), LineEnding::Crlf),
+            b"one\r\ntwo\r\n"
+        );
+        assert_eq!(encode(["x\ny"].into_iter(), LineEnding::Lf), b"x\ny");
+        let l = decode(b"fn main() {}\r\n".to_vec()).unwrap();
+        assert_eq!(
+            encode([l.text.as_str()].into_iter(), l.line_ending),
+            b"fn main() {}\r\n"
+        );
     }
 
     #[test]

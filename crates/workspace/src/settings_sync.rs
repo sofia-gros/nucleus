@@ -8,7 +8,7 @@ use gpui_kit::{
     App, AppContext as _, Context, KeyBinding, Window, component::WindowExt as _, component::notification::Notification,
 };
 use i18n::Translate as _;
-use project::DirWatcher;
+use remote::RemoteExt as _;
 use settings::{ActiveSettings, Settings};
 
 use crate::Workspace;
@@ -134,18 +134,25 @@ impl Workspace {
             .read(cx)
             .root()
             .map(|r| settings::workspace_settings_path(&r));
-        let Ok((mut watcher, mut rx)) = DirWatcher::new() else {
-            return;
-        };
-        for dir in [&user, &workspace].into_iter().flatten().filter_map(|p| p.parent()) {
-            if dir.is_dir() {
-                watcher.watch(dir);
-            }
+        let client = cx.remote();
+        let mut rx = client.subscribe();
+        let dirs: Vec<PathBuf> = [&user, &workspace]
+            .into_iter()
+            .flatten()
+            .filter_map(|p| p.parent().map(PathBuf::from))
+            .collect();
+        for dir in &dirs {
+            client.watch(dir);
         }
-        self.settings_watcher = Some(watcher);
+        let ours = move |e: &remote::Event| match e {
+            remote::Event::DirChanged(d) => dirs.iter().any(|x| *x == remote::unwire(d)),
+        };
         self.reload_settings(user.clone(), workspace.clone(), window, cx);
         self._settings_task = Some(cx.spawn_in(window, async move |this, cx| {
-            while rx.next().await.is_some() {
+            while let Some(e) = rx.next().await {
+                if !ours(&e) {
+                    continue;
+                }
                 cx.background_executor().timer(Duration::from_millis(100)).await;
                 while rx.try_recv().is_ok() {}
                 let (u, w) = (user.clone(), workspace.clone());

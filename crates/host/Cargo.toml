@@ -1,0 +1,25 @@
+[package]
+name = "host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# ホスト: ファイル・プロセス・拡張機能などを実際に扱う側。画面とは remote の取り決めで話す。
+# デスクトップ版では同じプロセスの中で、サーバー版ではネットワークの向こうで動く。
+
+[dependencies]
+anyhow.workspace = true
+log.workspace = true
+futures.workspace = true
+ignore.workspace = true
+notify.workspace = true
+trash.workspace = true
+project.workspace = true
+remote.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

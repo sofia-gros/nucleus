@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use gpui_kit::{
-    AppContext as _, ClipboardItem, Context, Entity, PromptLevel, Window,
+    App, AppContext as _, ClipboardItem, Context, Entity, PromptLevel, Window,
     component::{
         WindowExt as _,
         input::{InputEvent, InputState},
@@ -12,6 +12,8 @@ use gpui_kit::{
     },
 };
 use i18n::Translate as _;
+use project::EntryKind;
+use remote::RemoteExt as _;
 use serde::Deserialize;
 
 use crate::project_panel::{ProjectPanel, ProjectPanelEvent};
@@ -110,8 +112,9 @@ impl ProjectPanel {
                     if answer.await != Ok(0) {
                         return;
                     }
-                    let p = path.clone();
-                    let r = cx.background_spawn(async move { trash::delete(&p) }).await;
+                    let r = this.update(cx, |_, cx| cx.remote().trash(&path)).ok();
+                    let Some(r) = r else { return };
+                    let r = r.await;
                     this.update_in(cx, |this, window, cx| match r {
                         Ok(()) => {
                             cx.emit(ProjectPanelEvent::Deleted(path.clone()));
@@ -202,53 +205,80 @@ impl ProjectPanel {
             self.cancel_edit(cx);
             return;
         }
-        let result: Result<(), String> = if !valid_name(&name) {
-            Err(cx.t("core.tree.invalid-name").to_string())
-        } else if dir.join(&name).exists() {
-            // どこに、何（ファイルかフォルダか）があるのかを言う（VSCode と同じ）。
-            let key = if dir.join(&name).is_dir() {
-                "core.tree.exists-folder"
-            } else {
-                "core.tree.exists-file"
-            };
-            let place = dir
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| dir.display().to_string());
-            Err(cx
-                .t_args(key, &[("name", name.clone().into()), ("dir", place.into())])
-                .to_string())
-        } else {
-            let new = dir.join(&name);
-            match kind {
-                EditKind::NewFolder => std::fs::create_dir_all(&new).map_err(|e| e.to_string()),
-                EditKind::NewFile => std::fs::write(&new, "")
-                    .map(|_| cx.emit(ProjectPanelEvent::OpenFile(new.clone())))
-                    .map_err(|e| e.to_string()),
-                EditKind::Rename => match &target {
-                    Some(old) => std::fs::rename(old, &new)
-                        .map(|_| cx.emit(ProjectPanelEvent::Renamed(old.clone(), new.clone())))
-                        .map_err(|e| e.to_string()),
-                    None => Ok(()),
-                },
-            }
+        let existing = self
+            .tree
+            .as_ref()
+            .and_then(|t| t.entry(&dir.join(&name)))
+            .map(|e| e.kind);
+        // 大文字小文字だけを変える名前の変更は、同じものとして許す。
+        let case_only = target
+            .as_ref()
+            .and_then(|t| t.file_name())
+            .is_some_and(|n| n.to_string_lossy().to_lowercase() == name.to_lowercase());
+        if !valid_name(&name) {
+            return self.edit_failed(on_blur, cx.t("core.tree.invalid-name").to_string(), cx);
+        }
+        if let Some(kind) = existing.filter(|_| !case_only) {
+            return self.edit_failed(on_blur, self.exists_message(&dir, &name, kind, cx), cx);
+        }
+        let new = dir.join(&name);
+        let client = cx.remote();
+        type Op = std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), remote::RemoteError>>>>;
+        let op: Op = match kind {
+            EditKind::NewFolder => Box::pin(client.create_dir(&new)),
+            EditKind::NewFile => Box::pin(client.create_file(&new)),
+            EditKind::Rename => match &target {
+                Some(old) => Box::pin(client.rename(old, &new)),
+                None => return self.cancel_edit(cx),
+            },
         };
-        match result {
-            Ok(()) => {
-                self.editing = None;
-                self.refresh_dir(&dir, cx);
-                self.selected = Some(dir.join(&name));
-            }
-            // ほかを押して離れたときは、エラーを出したまま残さず取り消す。
-            Err(_) if on_blur => {
-                self.cancel_edit(cx);
-                return;
-            }
-            Err(e) => {
-                if let Some(edit) = self.editing.as_mut() {
-                    edit.error = Some(e);
+        cx.spawn(async move |this, cx| {
+            let result = op.await;
+            this.update(cx, |this, cx| match result {
+                Ok(()) => {
+                    match (kind, &target) {
+                        (EditKind::NewFile, _) => cx.emit(ProjectPanelEvent::OpenFile(new.clone())),
+                        (EditKind::Rename, Some(old)) => cx.emit(ProjectPanelEvent::Renamed(old.clone(), new.clone())),
+                        _ => {}
+                    }
+                    this.editing = None;
+                    this.refresh_dir(&dir, cx);
+                    this.selected = Some(new.clone());
+                    cx.notify();
                 }
-            }
+                // ツリーがまだ知らないものと名前がぶつかった（ほかで作られたばかりなど）。
+                Err(e) if e.kind == remote::ErrorKind::AlreadyExists => {
+                    let msg = this.exists_message(&dir, &name, EntryKind::File, cx);
+                    this.edit_failed(on_blur, msg, cx);
+                }
+                Err(e) => this.edit_failed(on_blur, e.to_string(), cx),
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// どこに、何（ファイルかフォルダか）があるのかを言う（VSCode と同じ）。
+    fn exists_message(&self, dir: &Path, name: &str, kind: EntryKind, cx: &App) -> String {
+        let key = match kind {
+            EntryKind::Dir => "core.tree.exists-folder",
+            EntryKind::File => "core.tree.exists-file",
+        };
+        let place = dir
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| dir.display().to_string());
+        cx.t_args(key, &[("name", name.to_string().into()), ("dir", place.into())])
+            .to_string()
+    }
+
+    /// 入力の下にエラーを出す。ほかを押して離れたときは、エラーを出したまま残さず取り消す。
+    fn edit_failed(&mut self, on_blur: bool, message: String, cx: &mut Context<Self>) {
+        if on_blur {
+            return self.cancel_edit(cx);
+        }
+        if let Some(edit) = self.editing.as_mut() {
+            edit.error = Some(message);
         }
         cx.notify();
     }

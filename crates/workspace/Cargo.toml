@@ -16,6 +16,7 @@ editor.workspace = true
 terminal.workspace = true
 extension_host.workspace = true
 lsp.workspace = true
+remote = { workspace = true, features = ["gpui"] }
 lsp-types.workspace = true
 settings.workspace = true
 serde.workspace = true
@@ -23,8 +24,6 @@ serde_json.workspace = true
 dirs.workspace = true
 futures.workspace = true
 nucleo-matcher.workspace = true
-ignore.workspace = true
-trash.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

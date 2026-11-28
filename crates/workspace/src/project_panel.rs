@@ -4,9 +4,8 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use futures::StreamExt as _;
 use gpui_kit::{
-    App, AppContext as _, Context, EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement,
-    ParentElement, Render, SharedString, StatefulInteractiveElement as _, Styled, Task, UniformListScrollHandle,
-    Window,
+    App, Context, EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement, ParentElement, Render,
+    SharedString, StatefulInteractiveElement as _, Styled, Task, UniformListScrollHandle, Window,
     assets::IconName,
     component::{
         Icon, Sizable as _,
@@ -21,7 +20,8 @@ use gpui_kit::{
     px, uniform_list,
 };
 use i18n::Translate as _;
-use project::{DirWatcher, EntryKind, ProjectTree, Row};
+use project::{EntryKind, ProjectTree, Row};
+use remote::RemoteExt as _;
 use theme::{Token, TokenColors as _};
 
 /// インデントの縦線（VSCode と同じく、祖先のフォルダの矢印の真下に引く）。
@@ -86,10 +86,9 @@ pub enum ProjectPanelEvent {
 
 pub struct ProjectPanel {
     focus: FocusHandle,
-    tree: Option<ProjectTree>,
+    pub(crate) tree: Option<ProjectTree>,
     rows: Arc<Vec<Row>>,
     pub(crate) selected: Option<PathBuf>,
-    watcher: Option<DirWatcher>,
     scroll: UniformListScrollHandle,
     /// ファイルの状態（Git など、Extension が付ける）。
     marks: std::collections::HashMap<PathBuf, extension_host::FileState>,
@@ -109,7 +108,6 @@ impl ProjectPanel {
             tree: None,
             rows: Arc::new(Vec::new()),
             selected: None,
-            watcher: None,
             scroll: UniformListScrollHandle::new(),
             context_target: None,
             marks: Default::default(),
@@ -124,38 +122,45 @@ impl ProjectPanel {
     }
 
     pub fn set_root(&mut self, root: PathBuf, cx: &mut Context<Self>) {
+        if let Some(old) = self.tree.take() {
+            let client = cx.remote();
+            for d in old.loaded_dirs() {
+                client.unwatch(d);
+            }
+        }
         let (tree, to_load) = ProjectTree::new(root);
         self.rows = tree.rows();
         self.tree = Some(tree);
         self.selected = None;
-        match DirWatcher::new() {
-            Ok((watcher, mut rx)) => {
-                self.watcher = Some(watcher);
-                // 変更通知は 100ms まとめてから、該当フォルダだけを読み直す。
-                self._watch_task = Some(cx.spawn(async move |this, cx| {
-                    while let Some(first) = rx.next().await {
-                        let mut dirs = vec![first];
-                        cx.background_executor().timer(Duration::from_millis(100)).await;
-                        while let Ok(d) = rx.try_recv() {
-                            dirs.push(d);
-                        }
-                        dirs.sort();
-                        dirs.dedup();
-                        let ok = this.update(cx, |this, cx| {
-                            for d in dirs {
-                                if this.tree.as_mut().is_some_and(|t| t.invalidate(&d)) {
-                                    this.load(d, cx);
-                                }
-                            }
-                        });
-                        if ok.is_err() {
-                            break;
+        let client = cx.remote();
+        let mut rx = client.subscribe();
+        // 変更通知は 100ms まとめてから、該当フォルダだけを読み直す。
+        self._watch_task = Some(cx.spawn(async move |this, cx| {
+            while let Some(first) = rx.next().await {
+                let mut dirs = Vec::new();
+                let mut push = |e: remote::Event| {
+                    let remote::Event::DirChanged(d) = e;
+                    dirs.push(remote::unwire(&d));
+                };
+                push(first);
+                cx.background_executor().timer(Duration::from_millis(100)).await;
+                while let Ok(e) = rx.try_recv() {
+                    push(e);
+                }
+                dirs.sort();
+                dirs.dedup();
+                let ok = this.update(cx, |this, cx| {
+                    for d in dirs {
+                        if this.tree.as_mut().is_some_and(|t| t.invalidate(&d)) {
+                            this.load(d, cx);
                         }
                     }
-                }));
+                });
+                if ok.is_err() {
+                    break;
+                }
             }
-            Err(e) => log::warn!("ファイルの監視を始められない: {e}"),
-        }
+        }));
         self.load(to_load, cx);
         cx.notify();
     }
@@ -303,8 +308,8 @@ impl ProjectPanel {
     /// フォルダの直下をバックグラウンドで読み、結果を反映する。
     fn load(&mut self, dir: PathBuf, cx: &mut Context<Self>) {
         let read = {
-            let dir = dir.clone();
-            cx.background_spawn(async move { project::read_dir(&dir) })
+            let read = cx.remote().read_dir(&dir);
+            async move { read.await.map_err(std::io::Error::other) }
         };
         cx.spawn(async move |this, cx| {
             let result = read.await;
@@ -314,8 +319,8 @@ impl ProjectPanel {
                     tree.set_children(&dir, result);
                     this.rows = tree.rows();
                 }
-                if ok && let Some(w) = this.watcher.as_mut() {
-                    w.watch(&dir);
+                if ok {
+                    cx.remote().watch(&dir);
                 }
                 cx.notify();
             })

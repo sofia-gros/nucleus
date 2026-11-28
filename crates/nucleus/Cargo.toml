@@ -13,6 +13,8 @@ env_logger.workspace = true
 theme.workspace = true
 i18n.workspace = true
 workspace.workspace = true
+host.workspace = true
+remote = { workspace = true, features = ["gpui"] }
 
 [lints]
 workspace = true

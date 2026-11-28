@@ -13,6 +13,8 @@ use gpui_kit::{
     },
 };
 
+use remote::RemoteExt as _;
+
 use crate::Workspace;
 
 /// 開いている Diff（ファイル → ビューと、開いた Extension）。
@@ -37,7 +39,37 @@ impl Workspace {
             self.dock_area.update(cx, |a, cx| a.select_panel(id, window, cx));
             return;
         }
-        let current = self.current_text(&path, cx);
+        // 開いていなければ、ホストから読んでから開く。
+        let current = match self.open_text(&path, cx) {
+            Some(t) => t,
+            None => {
+                let read = editor::file::load(cx.remote(), path.clone());
+                cx.spawn_in(window, async move |this, cx| {
+                    let current = read.await.map(|l| l.text).unwrap_or_default();
+                    this.update_in(cx, |this, window, cx| {
+                        this.open_diff_view(extension, path, rel, base, base_label, current, window, cx)
+                    })
+                    .ok();
+                })
+                .detach();
+                return;
+            }
+        };
+        self.open_diff_view(extension, path, rel, base, base_label, current, window, cx);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn open_diff_view(
+        &mut self,
+        extension: String,
+        path: PathBuf,
+        rel: String,
+        base: String,
+        base_label: String,
+        current: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let language = editor::language_for(&path, cx);
         let view = cx.new(|cx| DiffView::new(path, rel, base_label, base, current, language, true, cx));
         self._subscriptions
@@ -57,20 +89,28 @@ impl Workspace {
             .find(|v| v.read(cx).path() == path)
     }
 
-    /// エディタで開いていればその中身、なければディスクの中身。
-    fn current_text(&self, path: &Path, cx: &gpui_kit::App) -> String {
-        match self.editors.get(path).and_then(WeakEntity::upgrade) {
-            Some(e) => e.read(cx).state().read(cx).value().to_string(),
-            None => std::fs::read_to_string(path).unwrap_or_default(),
-        }
+    /// エディタで開いていれば、その中身。
+    fn open_text(&self, path: &Path, cx: &gpui_kit::App) -> Option<String> {
+        let e = self.editors.get(path).and_then(WeakEntity::upgrade)?;
+        Some(e.read(cx).state().read(cx).value().to_string())
     }
 
-    /// エディタの中身が変わったら、開いている Diff を新しくする。
+    /// エディタの中身が変わったら、開いている Diff を新しくする（開いていなければホストから読み直す）。
     pub(crate) fn refresh_diff(&mut self, path: &Path, cx: &mut Context<Self>) {
-        if let Some(view) = self.diff_view_for(path, cx) {
-            let text = self.current_text(path, cx);
+        let Some(view) = self.diff_view_for(path, cx) else {
+            return;
+        };
+        if let Some(text) = self.open_text(path, cx) {
             view.update(cx, |v, cx| v.set_current(text, cx));
+            return;
         }
+        let read = editor::file::load(cx.remote(), path.to_path_buf());
+        cx.spawn(async move |_, cx| {
+            if let Ok(l) = read.await {
+                view.update(cx, |v, cx| v.set_current(l.text, cx));
+            }
+        })
+        .detach();
     }
 
     fn on_diff_event(&mut self, e: &DiffViewEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -85,13 +125,34 @@ impl Workspace {
                     let state = editor.read(cx).state().clone();
                     let text = text.clone();
                     state.update(cx, |s, cx| s.replace_all(text, window, cx));
-                } else if let Err(e) = std::fs::write(path, text) {
-                    window.push_notification(Notification::error(format!("{}: {e}", path.display())), cx);
-                    return;
+                    self.refresh_diff(path, cx);
                 } else {
-                    self.extension_file_saved(path, cx);
+                    // 開いていないファイルはホストで書き換える（改行の形は元のまま）。
+                    let client = cx.remote();
+                    let (path, text) = (path.clone(), text.clone());
+                    cx.spawn_in(window, async move |this, cx| {
+                        let result = async {
+                            let le = match editor::file::load(client.clone(), path.clone()).await {
+                                Ok(l) => l.line_ending,
+                                Err(_) => editor::LineEnding::Lf,
+                            };
+                            let bytes = editor::file::encode(std::iter::once(text.as_str()), le);
+                            client.write_file(&path, bytes).await
+                        }
+                        .await;
+                        this.update_in(cx, |this, window, cx| match result {
+                            Ok(()) => {
+                                this.extension_file_saved(&path, cx);
+                                this.refresh_diff(&path, cx);
+                            }
+                            Err(e) => {
+                                window.push_notification(Notification::error(format!("{}: {e}", path.display())), cx)
+                            }
+                        })
+                        .ok();
+                    })
+                    .detach();
                 }
-                self.refresh_diff(path, cx);
             }
             DiffViewEvent::StageHunk { path, patch } => {
                 let Some(ext) = self

@@ -30,7 +30,8 @@ use gpui_kit::{
     px, uniform_list,
 };
 use i18n::Translate as _;
-use project::search::{self, FileMatches, SearchOptions, SearchResult};
+use project::search::{FileMatches, SearchOptions, SearchResult};
+use remote::RemoteExt as _;
 use theme::{Token, TokenColors as _};
 
 /// 一致の数の上限（これを超えたら止める）。
@@ -180,10 +181,10 @@ impl SearchPanel {
             if cancel.load(Ordering::Relaxed) {
                 return;
             }
-            let c = cancel.clone();
-            let result = cx
-                .background_spawn(async move { search::search(&root, &opts, LIMIT, &c) })
-                .await;
+            let Ok(search) = this.update(cx, |_, cx| cx.remote().search(&root, opts, LIMIT)) else {
+                return;
+            };
+            let result = search.await.map_err(|e| e.message);
             if cancel.load(Ordering::Relaxed) {
                 return;
             }

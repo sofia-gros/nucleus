@@ -27,6 +27,7 @@ use gpui_kit::{
 use theme::{Token, TokenColors as _};
 
 pub use file::{LineEnding, LoadError, Loaded};
+use remote::RemoteExt as _;
 
 /// Extension（`language` 権限）が足した、ファイルと言語の対応（gpui の Global）。
 #[derive(Clone, Debug, Default)]
@@ -188,7 +189,11 @@ impl EditorPanel {
         let path = self.path.clone();
         let line_ending = self.line_ending;
         self.saving = true;
-        let write = cx.background_spawn(async move { file::save(&path, rope.chunks(), line_ending) });
+        let client = cx.remote();
+        let write = cx.background_spawn(async move {
+            let bytes = file::encode(rope.chunks(), line_ending);
+            client.write_file(&path, bytes).await
+        });
         cx.spawn(async move |this, cx| {
             let result = write.await.map_err(|e| e.to_string());
             this.update(cx, |this, cx| {

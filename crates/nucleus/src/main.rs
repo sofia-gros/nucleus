@@ -12,6 +12,9 @@ fn main() {
         .with_assets(workspace::Assets)
         .run(|cx: &mut App| {
             gpui_kit::init(cx);
+            // デスクトップ版は、ホストを同じプロセスの中で動かしてつなぐ。
+            let host = host::Host::new();
+            remote::set_global(host::local(&host), cx);
             if let Err(e) = cx.text_system().add_fonts(workspace::fonts()) {
                 log::error!("同梱フォントを読み込めなかった: {e}");
             }

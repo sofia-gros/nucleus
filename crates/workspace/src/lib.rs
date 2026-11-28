@@ -48,6 +48,7 @@ use gpui_kit::{
     div, px, size,
 };
 use i18n::Translate as _;
+use remote::RemoteExt as _;
 use theme::{Token, TokenColors as _};
 
 pub use assets::{Assets, fonts};
@@ -197,7 +198,6 @@ pub struct Workspace {
     problems: Entity<problems::ProblemsPanel>,
     search: Entity<search_panel::SearchPanel>,
     last_saved_session: Option<session::Session>,
-    settings_watcher: Option<project::DirWatcher>,
     _settings_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -333,7 +333,6 @@ impl Workspace {
             problems: problems_panel,
             search: search_panel,
             last_saved_session: None,
-            settings_watcher: None,
             _settings_task: None,
             _subscriptions: subs,
         }
@@ -399,7 +398,8 @@ impl Workspace {
         }
         let load = {
             let path = path.clone();
-            cx.background_spawn(async move { editor::file::load(&path) })
+            let client = cx.remote();
+            cx.background_spawn(editor::file::load(client, path))
         };
         cx.spawn_in(window, async move |this, cx| {
             let result = load.await;

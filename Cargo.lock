@@ -1619,6 +1619,7 @@ dependencies = [
  "i18n",
  "log",
  "lsp-types",
+ "remote",
  "settings",
  "similar",
  "tempfile",
@@ -3513,6 +3514,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "host"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "ignore",
+ "log",
+ "notify",
+ "project",
+ "remote",
+ "tempfile",
+ "trash",
+]
+
+[[package]]
 name = "html5ever"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4811,8 +4827,10 @@ dependencies = [
  "anyhow",
  "env_logger",
  "gpui-kit",
+ "host",
  "i18n",
  "log",
+ "remote",
  "theme",
  "workspace",
 ]
@@ -5788,13 +5806,8 @@ dependencies = [
 name = "project"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "futures",
- "ignore",
- "log",
- "notify",
  "regex",
- "tempfile",
+ "serde",
 ]
 
 [[package]]
@@ -6227,6 +6240,18 @@ name = "regex-syntax"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d902046e6a28a1e4c3cab97258a0ce11e994903f01c2d97a9447a0b3df85f4f6"
+
+[[package]]
+name = "remote"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "gpui-kit",
+ "log",
+ "postcard",
+ "project",
+ "serde",
+]
 
 [[package]]
 name = "renderdoc-sys"
@@ -9919,19 +9944,18 @@ dependencies = [
  "futures",
  "gpui-kit",
  "i18n",
- "ignore",
  "log",
  "lsp",
  "lsp-types",
  "nucleo-matcher",
  "project",
+ "remote",
  "serde",
  "serde_json",
  "settings",
  "tempfile",
  "terminal",
  "theme",
- "trash",
 ]
 
 [[package]]

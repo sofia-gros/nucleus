@@ -1,39 +1,9 @@
-//! ファイル検索（Ctrl+P）のための一覧とあいまい検索。どちらもバックグラウンドで呼ぶ。
-
-use std::path::Path;
+//! ファイル検索（Ctrl+P）のあいまい検索。一覧はホストが作る（remote::Client::list_files）。
 
 use nucleo_matcher::{
     Config, Matcher, Utf32Str,
     pattern::{CaseMatching, Normalization, Pattern},
 };
-
-/// これより多いファイルは一覧に入れない（巨大なリポジトリでも応答性を保つ）。
-pub const MAX_FILES: usize = 200_000;
-
-/// プロジェクト内のファイル（`.gitignore` を反映した相対パス）。
-pub fn list_files(root: &Path) -> Vec<String> {
-    let mut out = Vec::new();
-    let walker = ignore::WalkBuilder::new(root)
-        .hidden(false)
-        .git_ignore(true)
-        .git_global(false)
-        .require_git(false)
-        .filter_entry(|e| e.file_name() != ".git")
-        .build();
-    for entry in walker.flatten() {
-        if !entry.file_type().is_some_and(|t| t.is_file()) {
-            continue;
-        }
-        if let Ok(rel) = entry.path().strip_prefix(root) {
-            out.push(rel.to_string_lossy().into_owned());
-            if out.len() >= MAX_FILES {
-                break;
-            }
-        }
-    }
-    out.sort();
-    out
-}
 
 /// `query` に合うものを、点数の高い順に最大 `limit` 件返す（`files` の添字）。
 /// 空のクエリなら先頭から `limit` 件。
@@ -69,19 +39,6 @@ pub fn fuzzy_top(files: &[String], query: &str, limit: usize) -> Vec<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn lists_files_respecting_gitignore() {
-        let d = tempfile::tempdir().unwrap();
-        let p = d.path();
-        std::fs::create_dir_all(p.join("src/a")).unwrap();
-        std::fs::create_dir_all(p.join("target")).unwrap();
-        std::fs::write(p.join(".gitignore"), "/target\n").unwrap();
-        std::fs::write(p.join("src/a/display_map.rs"), "").unwrap();
-        std::fs::write(p.join("src/main.rs"), "").unwrap();
-        std::fs::write(p.join("target/out"), "").unwrap();
-        assert_eq!(list_files(p), vec![".gitignore", "src/a/display_map.rs", "src/main.rs"]);
-    }
 
     #[test]
     fn ranks_file_name_matches_first() {

@@ -27,6 +27,7 @@ env_logger = "0.11"
 ignore = "0.4"
 regex = "1"
 similar = "2"
+postcard = { version = "1", default-features = false, features = ["alloc"] }
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier", "gzip"] }
 sha2 = "0.10"
 tar = "0.4"
@@ -46,6 +47,8 @@ settings = { path = "crates/settings" }
 terminal = { path = "crates/terminal" }
 extension_host = { path = "crates/extension_host" }
 lsp = { path = "crates/lsp" }
+remote = { path = "crates/remote" }
+host = { path = "crates/host" }
 wasmtime = { version = "51", default-features = false, features = ["component-model", "cranelift", "runtime", "std", "parallel-compilation", "cache", "addr2line"] }
 wasmtime-wasi = "51"
 lsp-types = { version = "0.97.0", features = ["proposed"] }

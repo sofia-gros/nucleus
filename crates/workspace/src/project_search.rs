@@ -12,6 +12,7 @@ use gpui_kit::{
 };
 use i18n::Translate as _;
 use project::search::{self, SearchOptions};
+use remote::RemoteExt as _;
 
 use crate::{Workspace, search_panel::SearchPanelEvent};
 
@@ -96,7 +97,8 @@ impl Workspace {
                 return;
             }
         };
-        let (mut total, mut changed, mut failed) = (0usize, 0usize, Vec::new());
+        let (mut total, mut changed) = (0usize, 0usize);
+        let mut on_disk = Vec::new();
         for path in files {
             if let Some(editor) = self.editors.get(path).and_then(WeakEntity::upgrade) {
                 let state = editor.read(cx).state().clone();
@@ -109,30 +111,47 @@ impl Workspace {
                 }
                 continue;
             }
-            let Ok(text) = std::fs::read_to_string(path) else {
-                failed.push(path.display().to_string());
-                continue;
-            };
-            let (new, n) = search::replace_text(&text, &re, replacement, options.regex);
-            if n == 0 {
-                continue;
-            }
-            match std::fs::write(path, new) {
-                Ok(()) => {
-                    total += n;
-                    changed += 1;
+            on_disk.push(path.clone());
+        }
+        // 開いていないファイルはホストで読み書きする（改行の形は元のまま）。
+        let client = cx.remote();
+        let (replacement, regex_mode) = (replacement.to_string(), options.regex);
+        cx.spawn_in(window, async move |this, cx| {
+            let mut failed = Vec::new();
+            for path in on_disk {
+                let loaded = match editor::file::load(client.clone(), path.clone()).await {
+                    Ok(l) => l,
+                    Err(e) => {
+                        failed.push(format!("{}: {e}", path.display()));
+                        continue;
+                    }
+                };
+                let (new, n) = search::replace_text(&loaded.text, &re, &replacement, regex_mode);
+                if n == 0 {
+                    continue;
                 }
-                Err(e) => failed.push(format!("{}: {e}", path.display())),
+                let bytes = editor::file::encode(std::iter::once(new.as_str()), loaded.line_ending);
+                match client.write_file(&path, bytes).await {
+                    Ok(()) => {
+                        total += n;
+                        changed += 1;
+                    }
+                    Err(e) => failed.push(format!("{}: {e}", path.display())),
+                }
             }
-        }
-        let msg = cx.t_args(
-            "core.search.replaced",
-            &[("count", total.into()), ("files", changed.into())],
-        );
-        window.push_notification(Notification::success(msg), cx);
-        for f in failed {
-            window.push_notification(Notification::error(f), cx);
-        }
-        self.search.update(cx, |s, cx| s.rerun(cx));
+            this.update_in(cx, |this, window, cx| {
+                let msg = cx.t_args(
+                    "core.search.replaced",
+                    &[("count", total.into()), ("files", changed.into())],
+                );
+                window.push_notification(Notification::success(msg), cx);
+                for f in failed {
+                    window.push_notification(Notification::error(f), cx);
+                }
+                this.search.update(cx, |s, cx| s.rerun(cx));
+            })
+            .ok();
+        })
+        .detach();
     }
 }
