@@ -17,6 +17,7 @@ mod project_actions;
 mod project_panel;
 mod project_search;
 mod prompt;
+mod quick_diff;
 mod recent;
 mod search_panel;
 mod session;
@@ -175,6 +176,8 @@ pub struct Workspace {
     settings_page: Option<WeakEntity<settings_page::SettingsPage>>,
     /// Extension の管理画面（開いていれば）。
     extensions_page: Option<WeakEntity<extensions_page::ExtensionsPage>>,
+    /// Extension が付けたプロジェクトツリーの印（Extension の ID → パス → 状態）。
+    file_marks: HashMap<String, HashMap<PathBuf, extension_host::FileState>>,
     /// 開いている Diff のタブ。
     diff_views: diff_views::DiffViews,
     /// ドックに置いた Extension のビュー。
@@ -288,9 +291,10 @@ impl Workspace {
         cx.defer_in(window, |this: &mut Workspace, window, cx| {
             this.start_extension_bridge(window, cx)
         });
-        subs.push(cx.observe_window_activation(window, |_, window, cx| {
+        subs.push(cx.observe_window_activation(window, |this, window, cx| {
             if window.is_window_active() {
                 extension_host::WasmHost::broadcast(extension_host::WorkspaceEvent::WindowFocused, cx);
+                this.refresh_all_diff_bases(cx);
             }
         }));
         let this = cx.entity().downgrade();
@@ -312,6 +316,7 @@ impl Workspace {
             extension_keys: HashSet::new(),
             extension_panels: Vec::new(),
             diff_views: Vec::new(),
+            file_marks: HashMap::new(),
             extensions_page: None,
             settings_page: None,
             ext_views_added: HashSet::new(),
@@ -446,6 +451,7 @@ impl Workspace {
                 EditorEvent::Saved => {
                     let path = panel.read(cx).path().to_path_buf();
                     this.lsp_saved(&path);
+                    this.refresh_diff_base(&panel, cx);
                     this.extension_file_saved(&path, cx);
                     cx.notify();
                 }
@@ -477,6 +483,7 @@ impl Workspace {
             panel.update(cx, |e, cx| e.go_to(pos, window, cx));
         }
         self.attach_editor_views(&panel, window, cx);
+        self.refresh_diff_base(&panel, cx);
         self.lsp_attach(panel, window, cx);
         self.save_session(cx);
         cx.notify();
@@ -543,6 +550,7 @@ impl Workspace {
         if store.stage == extension_host::Stage::Ready && !self.extension_errors_shown {
             self.extension_errors_shown = true;
             self.check_extension_updates(window, cx);
+            self.refresh_all_diff_bases(cx);
             // Extension の読み込みより先に開いていたファイルも、言語サーバーにつなぐ。
             let open: Vec<_> = self.editors.values().filter_map(WeakEntity::upgrade).collect();
             for e in open {

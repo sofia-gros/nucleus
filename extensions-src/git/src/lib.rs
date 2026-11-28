@@ -51,9 +51,41 @@ fn refresh() {
     let status = if host::workspace_root().is_none() {
         Err(String::new())
     } else {
-        git(&["status", "--porcelain=v1", "-b", "-z", "--untracked-files=all"]).map(|s| status::parse(&s))
+        git(&["status", "--porcelain=v1", "-b", "-z", "--untracked-files=all"]).map(|s| {
+            // git のパスはリポジトリの一番上からなので、開いているフォルダ（その下のこともある）からに直す。
+            let prefix = git(&["rev-parse", "--show-prefix"]).unwrap_or_default();
+            status::parse(&s).relative_to(prefix.trim())
+        })
     };
+    decorate(&status);
     with(|s| s.status = Some(status));
+}
+
+/// プロジェクトツリーに変更の印を付ける（API 1.3.0）。
+fn decorate(status: &Result<Status, String>) {
+    use host::{FileMark, FileState};
+    let Ok(st) = status else {
+        host::decorate_files(&[]);
+        return;
+    };
+    let state = |code: char| match code {
+        'A' => FileState::Added,
+        'U' => FileState::Untracked,
+        'D' => FileState::Deleted,
+        'R' | 'C' => FileState::Renamed,
+        '!' => FileState::Conflicted,
+        _ => FileState::Modified,
+    };
+    // 同じファイルがステージ済みと未ステージの両方にあれば、未ステージ（作業中）の方を見せる。
+    let mut marks: Vec<FileMark> = Vec::new();
+    for e in st.staged.iter().chain(st.unstaged.iter()) {
+        marks.retain(|m| m.path != e.path);
+        marks.push(FileMark {
+            path: e.path.clone(),
+            state: state(e.code),
+        });
+    }
+    host::decorate_files(&marks);
 }
 
 fn notify_err(r: Result<String, String>) {
@@ -100,11 +132,11 @@ fn show_diff(path: &str, staged: bool, code: &str) -> Result<(), String> {
         return host::open_file(path, None);
     }
     let (spec, label) = if staged {
-        (format!("HEAD:{path}"), "HEAD")
+        (format!("HEAD:./{path}"), "HEAD")
     } else {
         // ステージ済みの変更がなければ、インデックスは HEAD と同じ。
         let staged_too = with(|s| matches!(&s.status, Some(Ok(st)) if st.staged.iter().any(|e| e.path == path)));
-        (format!(":{path}"), if staged_too { "Index" } else { "HEAD" })
+        (format!(":./{path}"), if staged_too { "Index" } else { "HEAD" })
     };
     let base = git(&["show", &spec]).unwrap_or_default();
     host::show_diff(path, &base, label)
@@ -357,6 +389,7 @@ fn row(e: &Entry, staged: bool) -> El {
         None => (e.path.clone(), String::new()),
     };
     let tone = match e.code {
+        '!' => Tone::Danger,
         'M' => Tone::Warning,
         'A' | 'U' => Tone::Success,
         'D' => Tone::Danger,

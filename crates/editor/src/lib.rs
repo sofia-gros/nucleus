@@ -5,6 +5,7 @@ pub mod diff_view;
 pub mod fields;
 pub mod file;
 mod find_panel;
+mod quick_diff;
 
 pub use find_panel::{FindNext, FindPrevious};
 use find_panel::{FindPanel, FindPanelEvent};
@@ -90,6 +91,8 @@ pub struct EditorPanel {
     edit_version: std::rc::Rc<std::cell::Cell<u64>>,
     /// エディタの右側に置くビュー（Extension の MiniMap など）。
     side: Vec<gpui_kit::AnyView>,
+    /// 行番号の横の変更の印。
+    quick_diff: quick_diff::QuickDiff,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -115,6 +118,7 @@ impl EditorPanel {
                     let was_dirty = this.is_dirty();
                     this.version += 1;
                     this.edit_version.set(this.edit_version.get() + 1);
+                    this.quick_diff_changed(cx);
                     cx.emit(EditorEvent::Edited);
                     if !was_dirty {
                         cx.notify();
@@ -143,6 +147,7 @@ impl EditorPanel {
             find_panel: None,
             edit_version: Default::default(),
             side: Vec::new(),
+            quick_diff: Default::default(),
             _subscriptions: subs,
         }
     }

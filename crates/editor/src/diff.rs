@@ -200,3 +200,58 @@ mod tests {
         );
     }
 }
+
+/// エディタの行の横に出す変更の印。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LineChange {
+    Added,
+    Modified,
+    /// この行の上で行が消された（行数 0）。
+    Deleted,
+}
+
+/// 元からいまの内容への変更を、いまの内容の行（0 始まり）ごとの印にする。
+/// 消して足した行は「変更」、足しただけは「追加」、消しただけは「削除」（その位置の境目）。
+pub fn line_changes(old: &str, new: &str) -> Vec<(u32, u32, LineChange)> {
+    let mut out = Vec::new();
+    for h in compute(old, new, 0) {
+        let (removed, added) = (h.removed() as u32, h.added() as u32);
+        let start = h.new_start as u32;
+        match (removed, added) {
+            (0, a) => out.push((start, a, LineChange::Added)),
+            (_, 0) => out.push((start, 0, LineChange::Deleted)),
+            (r, a) => {
+                let changed = r.min(a);
+                out.push((start, changed, LineChange::Modified));
+                if a > changed {
+                    out.push((start + changed, a - changed, LineChange::Added));
+                }
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod line_change_tests {
+    use super::*;
+
+    #[test]
+    fn classifies_added_modified_and_deleted_lines() {
+        let old = "a\nb\nc\nd\ne\n";
+        let new = "a\nB\nc\nx\ny\ne\n";
+        // b → B（変更）、d → x, y（1 行変更、1 行追加）
+        assert_eq!(
+            line_changes(old, new),
+            vec![
+                (1, 1, LineChange::Modified),
+                (3, 1, LineChange::Modified),
+                (4, 1, LineChange::Added)
+            ]
+        );
+        // c を消した: 3 行目（d）の上に境目
+        assert_eq!(line_changes(old, "a\nb\nd\ne\n"), vec![(2, 0, LineChange::Deleted)]);
+        assert_eq!(line_changes(old, old), vec![]);
+        assert_eq!(line_changes("", "x\n"), vec![(0, 1, LineChange::Added)]);
+    }
+}

@@ -8,5 +8,5 @@ mod store;
 
 pub use loader::{FailedExtension, LoadedExtension, discover, user_extensions_dir};
 pub use manifest::Manifest;
-pub use runtime::{ActiveDocument, EditorViewInfo, HostContext, NoticeLevel, UiRequest, WorkspaceEvent, ui};
+pub use runtime::{ActiveDocument, EditorViewInfo, FileState, HostContext, NoticeLevel, UiRequest, WorkspaceEvent, ui};
 pub use store::{ExtensionCommand, ExtensionStore, ExtensionView, Stage, WasmHost, add_installed, start};

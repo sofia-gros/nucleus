@@ -83,6 +83,19 @@ pub struct Contributes {
     /// 利用者が拡張機能の画面で変えられる設定（権限不要。値は `get-setting` で読む）。
     #[serde(default)]
     pub settings: Vec<SettingContribution>,
+    /// 行番号の横の変更の印のための「元の内容」の取り方（`editor: [decorate]` と `process: [<コマンド>]`）。
+    /// Nucleus がファイルを開いた・保存した・ウィンドウに戻ったときにこのコマンドを実行し、標準出力を元の内容にする。
+    #[serde(default)]
+    pub quick_diff: Option<QuickDiffContribution>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QuickDiffContribution {
+    pub command: String,
+    /// `${path}` はワークスペースからの相対パス（`/` 区切り）に置き換える。
+    #[serde(default)]
+    pub args: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -220,6 +233,7 @@ const KNOWN: &[(&str, &str, bool)] = &[
     ("ui", "panel.right", false),
     ("ui", "panel.bottom", false),
     ("ui", "editor.side", false),
+    ("ui", "tree.decorate", false),
     ("ui", "tab", false),
     ("ui", "overlay", false),
     ("ui", "statusbar", false),
@@ -341,6 +355,17 @@ impl Manifest {
                     "コマンド `{}` は `{}.` で始める",
                     c.id,
                     self.id.split_once('.').map_or("", |(_, n)| n)
+                ));
+            }
+        }
+        if let Some(q) = &self.contributes.quick_diff {
+            if !self.has("editor", "decorate") {
+                errors.push("contributes.quick_diff には `editor: [decorate]` の権限が必要".into());
+            }
+            if !self.has("process", &q.command) {
+                errors.push(format!(
+                    "contributes.quick_diff には `process: [{}]` の権限が必要",
+                    q.command
                 ));
             }
         }

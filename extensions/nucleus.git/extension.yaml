@@ -1,14 +1,17 @@
 # 公式の Git Extension（ソースは extensions-src/git）。ui@1 で右ドックにビューを置く。
 id: nucleus.git
 name: Git
-version: 1.0.0
+version: 1.1.0
 publisher: nucleus
 description: Source control with git — changes, staging and commits.
 api: { core: 1, ui: 1 }
 permissions:
-  ui: [panel.right, tab]
+  ui: [panel.right, tab, tree.decorate]
+  editor: [decorate]
   process: [git]
 contributes:
+  # 行番号の横の変更の印: インデックス（ステージ済みの内容）と比べる。`:./` は今いるフォルダからのパス。
+  quick_diff: { command: git, args: ["show", ":./${path}"] }
   views:
     - { id: changes, title: Git, icon: git-branch, location: right }
   commands:

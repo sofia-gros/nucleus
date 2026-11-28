@@ -78,6 +78,11 @@ pub enum UiRequest {
         editor: u32,
         line: u32,
     },
+    /// プロジェクトツリーの印を置き換える（この Extension の分、絶対パス）。
+    DecorateFiles {
+        extension: String,
+        marks: Vec<(PathBuf, FileState)>,
+    },
     /// 差分を開く（すでに開いていれば元を新しくする）。
     ShowDiff {
         extension: String,
@@ -97,6 +102,18 @@ pub enum NoticeLevel {
     Info,
     Warning,
     Error,
+}
+
+/// プロジェクトツリーに出すファイルの状態。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FileState {
+    Modified,
+    Added,
+    Untracked,
+    Deleted,
+    Renamed,
+    Conflicted,
+    Ignored,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -674,6 +691,34 @@ impl host::Host for State {
 
     fn run_process(&mut self, command: String, args: Vec<String>) -> Result<ProcessOutput, String> {
         self.process(command, args, None)
+    }
+
+    fn decorate_files(&mut self, marks: Vec<host::FileMark>) {
+        if self.require("ui", "tree.decorate").is_err() {
+            return;
+        }
+        let Some(root) = self.host.root() else { return };
+        let marks = marks
+            .into_iter()
+            .take(20_000)
+            .filter_map(|m| {
+                let path = confine(&root, &m.path).ok()?;
+                let state = match m.state {
+                    host::FileState::Modified => FileState::Modified,
+                    host::FileState::Added => FileState::Added,
+                    host::FileState::Untracked => FileState::Untracked,
+                    host::FileState::Deleted => FileState::Deleted,
+                    host::FileState::Renamed => FileState::Renamed,
+                    host::FileState::Conflicted => FileState::Conflicted,
+                    host::FileState::Ignored => FileState::Ignored,
+                };
+                Some((path, state))
+            })
+            .collect();
+        let _ = self.host.ui.unbounded_send(UiRequest::DecorateFiles {
+            extension: self.manifest.id.clone(),
+            marks,
+        });
     }
 
     fn get_setting(&mut self, key: String) -> Option<String> {

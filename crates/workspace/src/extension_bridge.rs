@@ -191,7 +191,24 @@ impl Workspace {
                 base,
                 base_label,
             } => self.show_diff(extension, path, rel, base, base_label, window, cx),
+            UiRequest::DecorateFiles { extension, marks } => {
+                self.file_marks.insert(extension, marks.into_iter().collect());
+                let merged: std::collections::HashMap<_, _> = self
+                    .file_marks
+                    .values()
+                    .flat_map(|m| m.iter().map(|(p, s)| (p.clone(), *s)))
+                    .collect();
+                self.project.update(cx, |p, cx| p.set_marks(merged, cx));
+            }
             UiRequest::Invalidate { extension } => {
+                // Git の操作（ステージなど）の後は、変更の印の元の内容も変わりうる。
+                let has_quick_diff = extension_host::ExtensionStore::get(cx).is_some_and(|s| {
+                    s.enabled()
+                        .any(|e| e.manifest.id == extension && e.manifest.contributes.quick_diff.is_some())
+                });
+                if has_quick_diff {
+                    self.refresh_all_diff_bases(cx);
+                }
                 self.extension_panels.retain(|p| p.upgrade().is_some());
                 for p in self.extension_panels.iter().filter_map(WeakEntity::upgrade) {
                     if p.read(cx).extension == extension {

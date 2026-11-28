@@ -16,6 +16,27 @@ pub struct Entry {
     pub code: char,
 }
 
+impl Status {
+    /// パスを `prefix`（リポジトリの一番上から見た、開いているフォルダ。`src/` など）からの相対にする。
+    /// 開いているフォルダの外の変更は除く。
+    pub fn relative_to(mut self, prefix: &str) -> Status {
+        if prefix.is_empty() {
+            return self;
+        }
+        let strip = |list: Vec<Entry>| -> Vec<Entry> {
+            list.into_iter()
+                .filter_map(|e| {
+                    let path = e.path.strip_prefix(prefix)?.to_string();
+                    Some(Entry { path, code: e.code })
+                })
+                .collect()
+        };
+        self.staged = strip(self.staged);
+        self.unstaged = strip(self.unstaged);
+        self
+    }
+}
+
 pub fn parse(out: &str) -> Status {
     let mut st = Status::default();
     let mut fields = out.split('\0').filter(|s| !s.is_empty());
@@ -37,6 +58,11 @@ pub fn parse(out: &str) -> Status {
         }
         if x == '?' {
             st.unstaged.push(Entry { path, code: 'U' });
+            continue;
+        }
+        // 衝突（マージ中）: UU / AA / DD / AU / UA / DU / UD
+        if x == 'U' || y == 'U' || (x == 'A' && y == 'A') || (x == 'D' && y == 'D') {
+            st.unstaged.push(Entry { path, code: '!' });
             continue;
         }
         if x == '!' {
@@ -93,6 +119,21 @@ mod tests {
             unstaged,
             vec![("b.txt", 'M'), ("c.rs", 'M'), ("new/d.rs", 'U'), ("f.rs", 'D')]
         );
+    }
+
+    #[test]
+    fn paths_become_relative_to_the_open_folder() {
+        let st = parse("## main\0 M src/a.rs\0 M README.md\0").relative_to("src/");
+        let paths: Vec<_> = st.unstaged.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, vec!["a.rs"]);
+    }
+
+    #[test]
+    fn conflicts_are_not_untracked() {
+        let st = parse("## main\0UU a.rs\0?? b.rs\0");
+        let codes: Vec<_> = st.unstaged.iter().map(|e| (e.path.as_str(), e.code)).collect();
+        assert_eq!(codes, vec![("a.rs", '!'), ("b.rs", 'U')]);
+        assert!(st.staged.is_empty());
     }
 
     #[test]

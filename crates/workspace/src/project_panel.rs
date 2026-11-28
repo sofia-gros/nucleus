@@ -39,6 +39,32 @@ fn indent_guides(depth: usize, cx: &App) -> Vec<gpui_kit::Div> {
         .collect()
 }
 
+/// フォルダの点の色を決めるときの強さ（衝突 > 削除 > 変更 > 追加）。
+fn mark_rank(s: extension_host::FileState) -> u8 {
+    use extension_host::FileState::*;
+    match s {
+        Conflicted => 5,
+        Deleted => 4,
+        Modified | Renamed => 3,
+        Added | Untracked => 2,
+        Ignored => 0,
+    }
+}
+
+/// 状態の印（VSCode と同じ文字）と色。
+fn mark_style(s: extension_host::FileState) -> (&'static str, Token) {
+    use extension_host::FileState::*;
+    match s {
+        Modified => ("M", Token::HighlightModified),
+        Added => ("A", Token::HighlightCreated),
+        Untracked => ("U", Token::HighlightCreated),
+        Deleted => ("D", Token::HighlightDeleted),
+        Renamed => ("R", Token::HighlightInfo),
+        Conflicted => ("!", Token::HighlightError),
+        Ignored => ("", Token::MutedForeground),
+    }
+}
+
 /// ツリーに並べる1行。
 #[derive(Clone, Copy)]
 enum Slot {
@@ -65,6 +91,10 @@ pub struct ProjectPanel {
     pub(crate) selected: Option<PathBuf>,
     watcher: Option<DirWatcher>,
     scroll: UniformListScrollHandle,
+    /// ファイルの状態（Git など、Extension が付ける）。
+    marks: std::collections::HashMap<PathBuf, extension_host::FileState>,
+    /// 状態のあるファイルを含むフォルダ（点を付ける）と、その中で一番目立たせる状態。
+    marked_dirs: std::collections::HashMap<PathBuf, extension_host::FileState>,
     /// 右クリックした項目（パス, フォルダか）。
     context_target: Option<(PathBuf, bool)>,
     /// ツリーの中で入力している名前（新しいファイル・フォルダ、名前の変更）。
@@ -82,6 +112,8 @@ impl ProjectPanel {
             watcher: None,
             scroll: UniformListScrollHandle::new(),
             context_target: None,
+            marks: Default::default(),
+            marked_dirs: Default::default(),
             editing: None,
             _watch_task: None,
         }
@@ -125,6 +157,34 @@ impl ProjectPanel {
             Err(e) => log::warn!("ファイルの監視を始められない: {e}"),
         }
         self.load(to_load, cx);
+        cx.notify();
+    }
+
+    /// ファイルの状態を置き換える。
+    pub fn set_marks(
+        &mut self,
+        marks: std::collections::HashMap<PathBuf, extension_host::FileState>,
+        cx: &mut Context<Self>,
+    ) {
+        use extension_host::FileState;
+        let mut dirs: std::collections::HashMap<PathBuf, FileState> = Default::default();
+        let root = self.root();
+        for (path, state) in &marks {
+            if *state == FileState::Ignored {
+                continue;
+            }
+            for dir in path.ancestors().skip(1) {
+                if root.as_deref().is_some_and(|r| !dir.starts_with(r)) {
+                    break;
+                }
+                let e = dirs.entry(dir.to_path_buf()).or_insert(*state);
+                if mark_rank(*state) > mark_rank(*e) {
+                    *e = *state;
+                }
+            }
+        }
+        self.marks = marks;
+        self.marked_dirs = dirs;
         cx.notify();
     }
 
@@ -284,6 +344,12 @@ impl ProjectPanel {
     fn render_row(&self, ix: usize, row: &Row, window: &Window, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let selected = self.selected.as_ref() == Some(&row.path);
         let is_dir = row.kind == EntryKind::Dir;
+        let mark = self.marks.get(&row.path).copied();
+        let dir_mark = if is_dir {
+            self.marked_dirs.get(&row.path).copied()
+        } else {
+            None
+        };
         let chevron = if is_dir {
             Some(if row.expanded {
                 IconName::ChevronDown
@@ -340,12 +406,35 @@ impl ProjectPanel {
                         .text_ellipsis()
                         .text_sm()
                         .when(row.depth == 0, |d| d.font_weight(gpui_kit::FontWeight::MEDIUM))
-                        .text_color(if selected {
-                            cx.token(Token::SidebarAccentForeground)
-                        } else {
-                            cx.token(Token::SidebarForeground)
+                        .text_color(match mark.or(dir_mark) {
+                            Some(m) => cx.token(mark_style(m).1),
+                            None if selected => cx.token(Token::SidebarAccentForeground),
+                            None => cx.token(Token::SidebarForeground),
                         })
                         .child(SharedString::from(row.name.clone())),
+                )
+            })
+            // 右端の印: ファイルは状態の文字、フォルダは中に変更があれば点。
+            .when_some(mark.filter(|m| *m != extension_host::FileState::Ignored), |d, m| {
+                let (letter, token) = mark_style(m);
+                d.child(
+                    div()
+                        .w(px(14.))
+                        .flex_none()
+                        .text_xs()
+                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                        .text_color(cx.token(token))
+                        .child(letter),
+                )
+            })
+            .when_some(dir_mark.filter(|_| is_dir), |d, m| {
+                d.child(
+                    div()
+                        .size(px(6.))
+                        .mr(px(4.))
+                        .flex_none()
+                        .rounded_full()
+                        .bg(cx.token(mark_style(m).1)),
                 )
             })
             .when(row.loading, |d| {
