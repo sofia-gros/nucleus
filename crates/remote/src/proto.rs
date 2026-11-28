@@ -105,6 +105,20 @@ pub enum Request {
     TerminalClose {
         id: u64,
     },
+    /// 言語サーバーを起動する。返事は [`Response::Server`]。サーバーからのメッセージは [`Event::LspMessage`]。
+    LspStart {
+        command: String,
+        args: Vec<String>,
+        cwd: String,
+    },
+    /// 言語サーバーへメッセージ（JSON）を送る。送った順に届く。
+    LspSend {
+        id: u64,
+        body: Vec<u8>,
+    },
+    LspStop {
+        id: u64,
+    },
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -226,6 +240,7 @@ pub enum Response {
     Search(SearchResult),
     Output(ProcessOutput),
     Terminal(u64),
+    Server(u64),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -247,6 +262,15 @@ pub enum Event {
     TerminalClipboard {
         id: u64,
         text: String,
+    },
+    /// 言語サーバーからのメッセージ（JSON）。
+    LspMessage {
+        id: u64,
+        body: Vec<u8>,
+    },
+    /// 言語サーバーが終わった。
+    LspExited {
+        id: u64,
     },
 }
 

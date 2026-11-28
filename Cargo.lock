@@ -3518,6 +3518,7 @@ dependencies = [
  "futures",
  "ignore",
  "log",
+ "lsp",
  "notify",
  "project",
  "remote",

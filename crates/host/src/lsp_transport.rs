@@ -1,4 +1,4 @@
-//! JSON-RPC のフレーム（`Content-Length: N\r\n\r\n<body>`）。
+//! 言語サーバーとの JSON-RPC のフレーム（`Content-Length: N\r\n\r\n<body>`）。
 
 use std::io::{self, BufRead, Write};
 

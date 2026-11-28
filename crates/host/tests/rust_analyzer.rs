@@ -1,9 +1,10 @@
-//! 実物の rust-analyzer との初期化と、診断の通知を確かめる（rust-analyzer がなければスキップ）。
+//! 実物の rust-analyzer と、ホスト（host::local）越しに初期化して、診断の通知が届くかを確かめる
+//! （rust-analyzer がなければスキップ）。
 
 use std::time::Duration;
 
 use futures::StreamExt as _;
-use lsp::{LanguageServer, ServerConfig};
+use lsp::{LanguageServer, Link, ServerConfig};
 
 #[test]
 fn talks_to_rust_analyzer() {
@@ -33,7 +34,32 @@ fn talks_to_rust_analyzer() {
             args: vec![],
             initialization_options: None,
         };
-        let server = LanguageServer::start(config, dir.clone(), tx).await.expect("starts");
+        let client = host::local(&host::Host::new());
+        let id = client
+            .lsp_start("rust-analyzer".into(), vec![], &dir)
+            .await
+            .expect("starts");
+        let incoming = client
+            .subscribe_where(move |e| matches!(e, remote::Event::LspMessage { id: i, .. } if *i == id))
+            .filter_map(|e| {
+                futures::future::ready(match e {
+                    remote::Event::LspMessage { body, .. } => Some(body),
+                    _ => None,
+                })
+            })
+            .boxed();
+        let (c1, c2) = (client.clone(), client.clone());
+        let link = Link {
+            send: Box::new(move |body| c1.send(remote::Request::LspSend { id, body })),
+            incoming,
+            stop: Box::new(move || c2.send(remote::Request::LspStop { id })),
+        };
+        let spawn: lsp::Spawn = Box::new(|fut| {
+            std::thread::spawn(move || futures::executor::block_on(fut));
+        });
+        let server = LanguageServer::connect(config, dir.clone(), link, tx, spawn)
+            .await
+            .expect("initializes");
         assert!(server.capabilities.completion_provider.is_some());
         assert!(server.uses_utf32(), "rust-analyzer agrees to utf-32");
 

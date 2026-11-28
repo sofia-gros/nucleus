@@ -1,24 +1,37 @@
 use std::{
     collections::HashMap,
-    io::BufReader,
+    future::Future,
     path::PathBuf,
-    process::{Child, Command, Stdio},
+    pin::Pin,
     sync::{
         Arc, Mutex,
         atomic::{AtomicI64, Ordering},
-        mpsc,
     },
 };
 
-use anyhow::{Context as _, anyhow};
-use futures::channel::{mpsc::UnboundedSender, oneshot};
+use anyhow::anyhow;
+use futures::{
+    StreamExt as _,
+    channel::{mpsc::UnboundedSender, oneshot},
+};
 use lsp_types::{
     ClientCapabilities, InitializeParams, InitializeResult, PositionEncodingKind, ServerCapabilities, Uri,
     WorkspaceFolder, notification::Notification, request::Request,
 };
 use serde_json::{Value, json};
 
-use crate::transport;
+/// 言語サーバーとのつながり。サーバーの起動と読み書きは、ほか（ホスト）が受け持つ。
+pub struct Link {
+    /// メッセージ（JSON）を 1 つ送る。
+    pub send: Box<dyn Fn(Vec<u8>) + Send + Sync>,
+    /// サーバーからのメッセージ（JSON）。サーバーが終わると閉じる。
+    pub incoming: futures::stream::BoxStream<'static, Vec<u8>>,
+    /// サーバーを止める。
+    pub stop: Box<dyn Fn() + Send + Sync>,
+}
+
+/// 読み込みの Future を動かしてもらうための入れ物（実行のしかたは呼び出し側が決める）。
+pub type Spawn = Box<dyn FnOnce(Pin<Box<dyn Future<Output = ()> + Send>>)>;
 
 /// 言語サーバーの起動方法（Extension の `contributes.language_servers`）。
 #[derive(Clone, Debug, PartialEq)]
@@ -43,111 +56,79 @@ pub struct LanguageServer {
     pub capabilities: ServerCapabilities,
     /// 位置の数え方。`utf-32` ならコードポイント（gpui-kit のエディタと同じ）。
     pub position_encoding: PositionEncodingKind,
-    writer: mpsc::Sender<Vec<u8>>,
+    send: Arc<dyn Fn(Vec<u8>) + Send + Sync>,
+    stop: Box<dyn Fn() + Send + Sync>,
     pending: Pending,
     next_id: AtomicI64,
-    child: Mutex<Child>,
 }
 
 impl LanguageServer {
-    /// 起動して initialize まで済ませる。必ずバックグラウンドで呼ぶこと（プロセスの起動と初期化を待つ）。
-    pub async fn start(
+    /// つながったサーバーに initialize まで済ませる。`spawn` は読み込みの Future を動かす。
+    pub async fn connect(
         config: ServerConfig,
         root: PathBuf,
+        link: Link,
         notifications: UnboundedSender<ServerNotification>,
+        spawn: Spawn,
     ) -> anyhow::Result<Arc<LanguageServer>> {
-        let mut child = Command::new(&config.command)
-            .args(&config.args)
-            .current_dir(&root)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .with_context(|| format!("`{}` を起動できない", config.command))?;
-        let stdin = child.stdin.take().ok_or_else(|| anyhow!("stdin がない"))?;
-        let stdout = child.stdout.take().ok_or_else(|| anyhow!("stdout がない"))?;
-        let stderr = child.stderr.take();
-
+        let Link {
+            send,
+            mut incoming,
+            stop,
+        } = link;
+        let send: Arc<dyn Fn(Vec<u8>) + Send + Sync> = Arc::from(send);
         let pending: Pending = Arc::default();
-        let (writer, rx) = mpsc::channel::<Vec<u8>>();
-        // 書き込みスレッド
-        std::thread::Builder::new()
-            .name(format!("lsp-write {}", config.name))
-            .spawn(move || {
-                let mut stdin = stdin;
-                while let Ok(body) = rx.recv() {
-                    if transport::write_message(&mut stdin, &body).is_err() {
-                        break;
-                    }
-                }
-            })?;
-        // 読み込みスレッド: 応答は待っている要求へ、通知はチャネルへ、サーバーからの要求には既定の応答を返す。
+        // 読み込み: 応答は待っている要求へ、通知はチャネルへ、サーバーからの要求には既定の応答を返す。
         {
             let pending = pending.clone();
-            let writer = writer.clone();
+            let send = send.clone();
             let name = config.name.clone();
-            std::thread::Builder::new()
-                .name(format!("lsp-read {name}"))
-                .spawn(move || {
-                    let mut reader = BufReader::new(stdout);
-                    while let Ok(Some(body)) = transport::read_message(&mut reader) {
-                        let Ok(msg) = serde_json::from_slice::<Value>(&body) else {
-                            continue;
-                        };
-                        let method = msg.get("method").and_then(Value::as_str).map(str::to_string);
-                        let id = msg.get("id").cloned();
-                        match (method, id) {
-                            (None, Some(id)) => {
-                                let Some(id) = id.as_i64() else { continue };
-                                let result = match msg.get("error") {
-                                    Some(e) => {
-                                        Err(e.get("message").and_then(Value::as_str).unwrap_or("error").to_string())
-                                    }
-                                    None => Ok(msg.get("result").cloned().unwrap_or(Value::Null)),
-                                };
-                                if let Some(tx) = pending.lock().expect("pending").remove(&id) {
-                                    let _ = tx.send(result);
-                                }
+            spawn(Box::pin(async move {
+                while let Some(body) = incoming.next().await {
+                    let Ok(msg) = serde_json::from_slice::<Value>(&body) else {
+                        continue;
+                    };
+                    let method = msg.get("method").and_then(Value::as_str).map(str::to_string);
+                    let id = msg.get("id").cloned();
+                    match (method, id) {
+                        (None, Some(id)) => {
+                            let Some(id) = id.as_i64() else { continue };
+                            let result = match msg.get("error") {
+                                Some(e) => Err(e.get("message").and_then(Value::as_str).unwrap_or("error").to_string()),
+                                None => Ok(msg.get("result").cloned().unwrap_or(Value::Null)),
+                            };
+                            if let Some(tx) = pending.lock().expect("pending").remove(&id) {
+                                let _ = tx.send(result);
                             }
-                            (Some(method), Some(id)) => {
-                                let result = default_response(&method, msg.get("params"));
-                                let reply = json!({ "jsonrpc": "2.0", "id": id, "result": result });
-                                let _ = writer.send(serde_json::to_vec(&reply).expect("json"));
-                            }
-                            (Some(method), None) => {
-                                let params = msg.get("params").cloned().unwrap_or(Value::Null);
-                                let _ = notifications.unbounded_send(ServerNotification { method, params });
-                            }
-                            _ => {}
                         }
+                        (Some(method), Some(id)) => {
+                            let result = default_response(&method, msg.get("params"));
+                            let reply = json!({ "jsonrpc": "2.0", "id": id, "result": result });
+                            send(serde_json::to_vec(&reply).expect("json"));
+                        }
+                        (Some(method), None) => {
+                            let params = msg.get("params").cloned().unwrap_or(Value::Null);
+                            let _ = notifications.unbounded_send(ServerNotification { method, params });
+                        }
+                        _ => {}
                     }
-                    log::info!("言語サーバー `{name}` の出力が終わった");
-                    // 残っている要求はすべて失敗にする。
-                    for (_, tx) in pending.lock().expect("pending").drain() {
-                        let _ = tx.send(Err("server exited".into()));
-                    }
-                })?;
-        }
-        if let Some(stderr) = stderr {
-            let name = config.name.clone();
-            std::thread::Builder::new()
-                .name(format!("lsp-err {name}"))
-                .spawn(move || {
-                    use std::io::BufRead as _;
-                    for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                        log::debug!("[{name}] {line}");
-                    }
-                })?;
+                }
+                log::info!("言語サーバー `{name}` の出力が終わった");
+                // 残っている要求はすべて失敗にする。
+                for (_, tx) in pending.lock().expect("pending").drain() {
+                    let _ = tx.send(Err("server exited".into()));
+                }
+            }));
         }
 
         let mut server = LanguageServer {
             config,
             capabilities: ServerCapabilities::default(),
             position_encoding: PositionEncodingKind::UTF16,
-            writer,
+            send,
+            stop,
             pending,
             next_id: AtomicI64::new(1),
-            child: Mutex::new(child),
         };
         let root_uri = path_to_uri(&root)?;
         let name = root
@@ -156,7 +137,8 @@ impl LanguageServer {
             .unwrap_or_default();
         #[allow(deprecated)]
         let params = InitializeParams {
-            process_id: Some(std::process::id()),
+            // サーバーはホストが動かし、止めるのもホストなので、こちらのプロセス番号は伝えない。
+            process_id: None,
             root_uri: Some(root_uri.clone()),
             workspace_folders: Some(vec![WorkspaceFolder { uri: root_uri, name }]),
             initialization_options: server.config.initialization_options.clone(),
@@ -183,9 +165,7 @@ impl LanguageServer {
         let (tx, rx) = oneshot::channel();
         self.pending.lock().expect("pending").insert(id, tx);
         let msg = json!({ "jsonrpc": "2.0", "id": id, "method": R::METHOD, "params": params });
-        self.writer
-            .send(serde_json::to_vec(&msg)?)
-            .map_err(|_| anyhow!("サーバーが終了している"))?;
+        (self.send)(serde_json::to_vec(&msg)?);
         let value = rx
             .await
             .map_err(|_| anyhow!("応答がない"))?
@@ -201,17 +181,15 @@ impl LanguageServer {
     pub fn notify<N: Notification>(&self, params: N::Params) {
         let msg = json!({ "jsonrpc": "2.0", "method": N::METHOD, "params": params });
         if let Ok(body) = serde_json::to_vec(&msg) {
-            let _ = self.writer.send(body);
+            (self.send)(body);
         }
     }
 
-    /// shutdown → exit。終わらなければプロセスを止める。
+    /// shutdown → exit。終わらなければ止める。
     pub async fn shutdown(&self) {
         let _ = self.request_raw::<lsp_types::request::Shutdown>(()).await;
         self.notify::<lsp_types::notification::Exit>(());
-        if let Ok(mut child) = self.child.lock() {
-            let _ = child.kill();
-        }
+        (self.stop)();
     }
 
     pub fn uses_utf32(&self) -> bool {
@@ -221,9 +199,7 @@ impl LanguageServer {
 
 impl Drop for LanguageServer {
     fn drop(&mut self) {
-        if let Ok(mut child) = self.child.lock() {
-            let _ = child.kill();
-        }
+        (self.stop)();
     }
 }
 

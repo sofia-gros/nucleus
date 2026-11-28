@@ -21,6 +21,7 @@ alacritty_terminal = "0.26"
 
 [dev-dependencies]
 tempfile.workspace = true
+lsp.workspace = true
 
 [lints]
 workspace = true

@@ -5,6 +5,8 @@
 //! どちらも同じ符号化を通るので、動きは変わらない。
 
 pub mod fs;
+pub mod lsp;
+mod lsp_transport;
 pub mod process;
 pub mod search;
 pub mod terminal;
@@ -34,8 +36,8 @@ pub struct Host {
 
 #[derive(Default)]
 struct HostState {
-    /// ターミナルの番号（接続をまたいで重ならないように）。
-    next_terminal: std::sync::atomic::AtomicU64,
+    /// ターミナルや言語サーバーの番号（接続をまたいで重ならないように）。
+    next_id: std::sync::atomic::AtomicU64,
 }
 
 impl Host {
@@ -49,6 +51,7 @@ impl Host {
             host: self.clone(),
             send,
             terminals: Mutex::new(HashMap::new()),
+            servers: Mutex::new(HashMap::new()),
             cancels: Mutex::new(HashMap::new()),
             watcher: Mutex::new(None),
             closed: AtomicBool::new(false),
@@ -64,6 +67,7 @@ struct ConnInner {
     host: Host,
     send: remote::Sender,
     terminals: Mutex<HashMap<u64, terminal::HostTerminal>>,
+    servers: Mutex<HashMap<u64, lsp::HostServer>>,
     /// 打ち切れる頼みごと（検索など）。
     cancels: Mutex<HashMap<u64, Arc<AtomicBool>>>,
     watcher: Mutex<Option<DirWatcher>>,
@@ -90,6 +94,7 @@ impl Connection {
         self.0.closed.store(true, Ordering::SeqCst);
         self.0.watcher.lock().unwrap().take();
         self.0.terminals.lock().unwrap().clear();
+        self.0.servers.lock().unwrap().clear();
         for (_, flag) in self.0.cancels.lock().unwrap().drain() {
             flag.store(true, Ordering::Relaxed);
         }
@@ -145,8 +150,35 @@ impl Connection {
                 self.0.terminals.lock().unwrap().remove(&t);
                 return self.reply(id, Ok(Response::Done));
             }
+            Request::LspSend { id: server, body } => {
+                if let Some(s) = self.0.servers.lock().unwrap().get(&server) {
+                    s.send(body);
+                }
+                return self.reply(id, Ok(Response::Done));
+            }
+            Request::LspStop { id: server } => {
+                self.0.servers.lock().unwrap().remove(&server);
+                return self.reply(id, Ok(Response::Done));
+            }
+            Request::LspStart { command, args, cwd } => {
+                let n = self.0.host.state.next_id.fetch_add(1, Ordering::Relaxed) + 1;
+                let this = self.clone();
+                return match lsp::HostServer::start(n, &command, &args, &cwd, move |e| this.event(e)) {
+                    Ok(server) => {
+                        self.0.servers.lock().unwrap().insert(n, server);
+                        self.reply(id, Ok(Response::Server(n)))
+                    }
+                    Err(e) => self.reply(
+                        id,
+                        Err(RemoteError::new(
+                            remote::ErrorKind::NotFound,
+                            format!("`{command}` を起動できない: {e}"),
+                        )),
+                    ),
+                };
+            }
             Request::TerminalOpen(spec) => {
-                let t = self.0.host.state.next_terminal.fetch_add(1, Ordering::Relaxed) + 1;
+                let t = self.0.host.state.next_id.fetch_add(1, Ordering::Relaxed) + 1;
                 let this = self.clone();
                 let result = terminal::HostTerminal::open(t, spec, move |e| this.event(e));
                 return match result {
@@ -255,7 +287,10 @@ fn run(request: Request, cancel: &AtomicBool) -> Result<Response, RemoteError> {
         | Request::TerminalInput { .. }
         | Request::TerminalResize { .. }
         | Request::TerminalScroll { .. }
-        | Request::TerminalClose { .. } => Response::Done,
+        | Request::TerminalClose { .. }
+        | Request::LspStart { .. }
+        | Request::LspSend { .. }
+        | Request::LspStop { .. } => Response::Done,
     })
 }
 

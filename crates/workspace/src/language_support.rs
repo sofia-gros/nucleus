@@ -30,6 +30,7 @@ use lsp_types::{
     notification::{DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument},
     request::{Completion, GotoDefinition, HoverRequest},
 };
+use remote::RemoteExt as _;
 
 use crate::Workspace;
 
@@ -96,6 +97,40 @@ impl DocSync {
             position: self.position(text, offset),
         }
     }
+}
+
+/// ホストに言語サーバーを起動してもらい、つながったら initialize まで済ませる。
+async fn start_server(
+    client: remote::Client,
+    executor: gpui_kit::BackgroundExecutor,
+    config: ServerConfig,
+    root: PathBuf,
+    notifications: futures::channel::mpsc::UnboundedSender<ServerNotification>,
+) -> Result<Arc<LanguageServer>> {
+    let id = client
+        .lsp_start(config.command.clone(), config.args.clone(), &root)
+        .await?;
+    // このサーバーからのメッセージだけを受け取り、終わったら閉じる。
+    let incoming = client
+        .subscribe_where(move |e| {
+            matches!(e, remote::Event::LspMessage { id: i, .. } | remote::Event::LspExited { id: i } if *i == id)
+        })
+        .take_while(|e| futures::future::ready(!matches!(e, remote::Event::LspExited { .. })))
+        .filter_map(|e| {
+            futures::future::ready(match e {
+                remote::Event::LspMessage { body, .. } => Some(body),
+                _ => None,
+            })
+        })
+        .boxed();
+    let (send_client, stop_client) = (client.clone(), client);
+    let link = lsp::Link {
+        send: Box::new(move |body| send_client.send(remote::Request::LspSend { id, body })),
+        incoming,
+        stop: Box::new(move || stop_client.send(remote::Request::LspStop { id })),
+    };
+    let spawn: lsp::Spawn = Box::new(move |fut| executor.spawn(fut).detach());
+    LanguageServer::connect(config, root, link, notifications, spawn).await
 }
 
 /// 言語サーバーの位置を、テキストのバイト位置にする。
@@ -196,7 +231,7 @@ impl Workspace {
                 self.lsp.status.insert(config.name.clone(), ServerStatus::Starting);
                 let (tx, mut rx) = futures::channel::mpsc::unbounded::<ServerNotification>();
                 let name = config.name.clone();
-                let start = cx.background_spawn(LanguageServer::start(config, root, tx));
+                let start = start_server(cx.remote(), cx.background_executor().clone(), config, root, tx);
                 // サーバーからの通知を受け取り続ける。
                 cx.spawn_in(window, {
                     let name = name.clone();

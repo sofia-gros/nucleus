@@ -266,6 +266,26 @@ impl Client {
         }
     }
 
+    /// 言語サーバーを起動する。返事はサーバーの番号。
+    pub fn lsp_start(
+        &self,
+        command: String,
+        args: Vec<String>,
+        cwd: &Path,
+    ) -> impl Future<Output = Result<u64, RemoteError>> + use<> {
+        let p = self.request(Request::LspStart {
+            command,
+            args,
+            cwd: wire(cwd),
+        });
+        async move {
+            match p.await? {
+                Response::Server(id) => Ok(id),
+                r => Err(unexpected(r)),
+            }
+        }
+    }
+
     /// 返事を待たずに送る（キー入力など。送った順に届く）。
     pub fn send(&self, request: Request) {
         drop(DetachOnDrop(self.request(request)));
